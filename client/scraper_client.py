@@ -90,17 +90,22 @@ class ScraperClient:
     def submit_chapters(self, url: str, from_chapter: int | None = None, to_chapter: int | None = None,
                         max_chapters: int | None = None, from_url: str | None = None,
                         delay_ms: int | None = None, priority: str | None = None,
-                        engine: str | None = None) -> dict:
-        """Queue a chapter scrape. priority="low" for backfills. Returns the
+                        engine: str | None = None, notify_url: str | None = None,
+                        notify_kind: str | None = None) -> dict:
+        """Queue a chapter scrape. priority="low" for backfills. notify_url also
+        gets the job's "blocked" notice (notify_kind "ntfy" or "json"). Returns the
         job (an identical active job is returned instead, with deduped=True)."""
         body = {"url": url, "fromChapter": from_chapter, "toChapter": to_chapter,
                 "maxChapters": max_chapters, "fromUrl": from_url, "delayMs": delay_ms,
-                "priority": priority, "engine": engine}
+                "priority": priority, "engine": engine,
+                "notifyUrl": notify_url, "notifyKind": notify_kind}
         return self._req("POST", "/jobs", {k: v for k, v in body.items() if v is not None})[1]
 
-    def submit_toc(self, url: str, engine: str | None = None) -> dict:
+    def submit_toc(self, url: str, engine: str | None = None, notify_url: str | None = None,
+                   notify_kind: str | None = None) -> dict:
         """Queue a table-of-contents lookup."""
-        return self._req("POST", "/toc", {"url": url, **({"engine": engine} if engine else {})})[1]
+        body = {"url": url, "engine": engine, "notifyUrl": notify_url, "notifyKind": notify_kind}
+        return self._req("POST", "/toc", {k: v for k, v in body.items() if v is not None})[1]
 
     def status(self, job_id: str) -> dict:
         return self._req("GET", f"/jobs/{job_id}")[1]

@@ -97,6 +97,9 @@ When a challenge shows up, the runner escalates in this order:
 2. Click the Turnstile checkbox, up to `challengeClicks` times.
 3. Mark the job `blocked`, send a notice to `NOTIFY_URL` with the noVNC link, and wait up to `CHALLENGE_TIMEOUT_MS` for you to solve it.
 
+A job can also name its own `notifyUrl` (plus `notifyKind`: `ntfy` or `json`) in
+`POST /jobs` or `POST /toc`. Its notice goes there as well as to `NOTIFY_URL`.
+
 Every outcome is logged to `challenge_events`.
 
 ## Engines (`ENGINE=`)

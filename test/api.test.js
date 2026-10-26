@@ -128,6 +128,15 @@ test('priority: low is recorded, and does not split dedupe', async () => {
   assert.equal((await req('POST', '/jobs', { ...body, priority: 'urgent' })).status, 400);
 });
 
+test('notifyUrl: validated and kept with the job params', async () => {
+  const bad = await req('POST', '/toc', { url: 'https://twkan.com/book/7.html', notifyUrl: 'ftp://x' });
+  assert.equal(bad.status, 400);
+  const ok = await req('POST', '/toc', { url: 'https://twkan.com/book/7.html', notifyUrl: 'https://ntfy.sh/t', notifyKind: 'json' });
+  assert.equal(ok.status, 202);
+  assert.equal(ok.body.params.notifyUrl, 'https://ntfy.sh/t');
+  assert.equal(ok.body.params.notifyKind, 'json');
+});
+
 test('result paging slices chapters but keeps the total', async () => {
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(path.join(dataDir, 'scraper.db'));

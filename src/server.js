@@ -50,6 +50,11 @@ app.addHook('onRequest', async (req, reply) => {
 // Schemas
 // ---------------------------------------------------------------------------
 const posInt = { type: 'integer', minimum: 1 };
+// Per-job notice target, on top of the global NOTIFY_URL (not part of dedupe).
+const notifyProps = {
+  notifyUrl: { type: 'string', pattern: '^https?://', description: 'Also send this job\'s "blocked" notice here (ntfy topic or webhook)' },
+  notifyKind: { type: 'string', enum: ['ntfy', 'json'], description: 'Body format for notifyUrl (default ntfy)' },
+};
 const idParams = { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] };
 const error = { type: 'object', properties: { error: { type: 'string' } }, additionalProperties: true };
 
@@ -98,6 +103,7 @@ const createJobSchema = {
         description: 'low = backfill: runs when nothing normal is queued, and steps aside between pages ' +
           'when a normal job arrives (resuming later from its last captured page)',
       },
+      ...notifyProps,
     },
   },
   response: { 200: jobView, 202: jobView, 400: error },
@@ -114,6 +120,7 @@ const tocSchema = {
     properties: {
       url: { type: 'string', minLength: 1, description: 'Any page of the book' },
       engine: { type: 'string', enum: engineNames, description: 'Browser engine for this job (default: the ENGINE setting)' },
+      ...notifyProps,
     },
   },
   response: { 200: jobView, 202: jobView, 400: error },
