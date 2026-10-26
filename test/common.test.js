@@ -61,6 +61,20 @@ test('groupChapters keys on explicit number (novellunar)', () => {
   assert.equal(out[0].published, '2 days ago');
 });
 
+test('groupChapters merges "(n/m)" split pages (novel543)', () => {
+  const out = groupChapters([
+    { url: 'u/433.html', title: '第 433 章 你在空證什麼？ (1/2)', text: 'a' },
+    { url: 'u/433_2.html', title: '第 433 章 你在空證什麼？ (2/2)', text: 'b' },
+    { url: 'u/434.html', title: '第434章 下一章（1/2）', text: 'c' },
+  ]);
+  assert.equal(out.length, 2);
+  assert.deepEqual(out.map((c) => c.number), [433, 434]);
+  assert.equal(out[0].title, '第 433 章 你在空證什麼？');
+  assert.deepEqual(out[0].sourceUrls, ['u/433.html', 'u/433_2.html']);
+  assert.equal(out[0].text, 'a\n\n\nb');
+  assert.equal(out[1].title, '第434章 下一章');
+});
+
 test('site routing', () => {
   assert.equal(adapterFor('https://twkan.com/book/12345.html').name, 'twkan');
   assert.equal(adapterFor('https://www.twkan.com/txt/12345/678').name, 'twkan');
@@ -70,6 +84,10 @@ test('site routing', () => {
   assert.equal(adapterFor('https://www.69shuba.com/book/90412/').name, '69shuba');
   assert.equal(adapterFor('https://www.69shuba.com/txt/90412/40746386').bookId(new URL('https://www.69shuba.com/txt/90412/40746386')), '90412');
   assert.equal(adapterFor('https://www.69shuba.com/novels/class/6.htm'), null);
+  assert.equal(adapterFor('https://www.novel543.com/12098050571/').name, 'novel543');
+  assert.equal(adapterFor('https://www.novel543.com/12098050571/dir').name, 'novel543');
+  assert.equal(adapterFor('https://novel543.com/12098050571/8095_1.html').bookId(new URL('https://novel543.com/12098050571/8095_1.html')), '12098050571');
+  assert.equal(adapterFor('https://www.novel543.com/bookstack/xuanhuan/'), null);
   assert.equal(adapterFor('https://evil-twkan.com/book/1.html'), null);
   assert.equal(adapterFor('https://twkan.com/'), null);
   assert.equal(adapterFor('not a url'), null);

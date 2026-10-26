@@ -13,7 +13,8 @@
     "https://*.twkan.com/*",
     "https://*.wfxs.tw/*",
     "https://*.novellunar.com/*",
-    "https://*.69shuba.com/*"
+    "https://*.69shuba.com/*",
+    "https://*.novel543.com/*"
   ],
   "background": {
     "service_worker": "background.js"

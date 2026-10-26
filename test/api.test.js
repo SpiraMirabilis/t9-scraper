@@ -52,7 +52,7 @@ test('openapi spec lists the routes', async () => {
 test('supported_sites: sorted domain list from the adapters', async () => {
   const r = await req('GET', '/supported_sites');
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body, ['69shuba.com', 'novellunar.com', 'twkan.com', 'wfxs.tw']);
+  assert.deepEqual(r.body, ['69shuba.com', 'novel543.com', 'novellunar.com', 'twkan.com', 'wfxs.tw']);
 });
 
 test('dedupe: identical active job is returned, different range is new', async () => {

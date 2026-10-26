@@ -53,18 +53,23 @@ export const parseChapterNumber = (title) => {
   return m ? cnToNum(m[1]) : null;
 };
 
+// A trailing "(1/2)" / "（2/2）" marks one page of a chapter split across
+// several pages (novel543). It's dropped from the title so the pages merge.
+export const PAGE_SUFFIX_RE = /\s*[（(]\s*\d+\s*\/\s*\d+\s*[）)]\s*$/;
+export const chapterTitle = (title) => (title || '').trim().replace(PAGE_SUFFIX_RE, '');
+
 // Identity of the chapter a page belongs to. Paginated splits of one chapter
-// share a title (twkan) -- or a URL-derived number (novellunar) -- so pages
-// with the same key merge.
+// share a title (twkan, novel543 once the "(n/m)" suffix is gone) -- or a
+// URL-derived number (novellunar) -- so pages with the same key merge.
 export const chapterKey = (p) =>
-  Number.isFinite(p.number) ? `#${p.number}` : (p.title || '').trim();
+  Number.isFinite(p.number) ? `#${p.number}` : chapterTitle(p.title);
 
 // Group consecutive pages into chapters. Replaces the fragile downstream
 // "split a flat file on a chapter-header regex" step.
 export const groupChapters = (pages, { headerRe = CN_HEADER_RE } = {}) => {
   const chapters = [];
   for (const p of pages) {
-    const title = (p.title || '').trim();
+    const title = chapterTitle(p.title);
     const key = chapterKey(p);
     const body = stripLeadingHeader(p.text || '', { headerRe, title });
     const last = chapters[chapters.length - 1];
