@@ -271,6 +271,14 @@ app.get('/sites', {
   schema: { tags: ['ops'], summary: 'Effective per-site settings' },
 }, async () => allSiteSettings(adapters));
 
+app.get('/supported_sites', {
+  schema: {
+    tags: ['ops'],
+    summary: 'Domains we can scrape (subdomains included)',
+    response: { 200: { type: 'array', items: { type: 'string' } } },
+  },
+}, async () => [...new Set(adapters.flatMap((a) => a.hosts))].sort());
+
 app.get('/stats/challenges', {
   schema: {
     tags: ['ops'], summary: 'Challenge outcomes per engine and site',

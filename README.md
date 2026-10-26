@@ -41,6 +41,7 @@ All other routes except `/health` need `Authorization: Bearer $API_TOKEN`.
 | `DELETE /jobs/:id` | Cancel |
 | `GET /jobs?status=&limit=` | List, newest first |
 | `GET /sites` | Effective per-site settings |
+| `GET /supported_sites` | JSON array of supported domains (subdomains included) |
 | `GET /stats/challenges?since=` | Challenge outcomes per engine and site |
 | `GET /health` | Engine and display status |
 

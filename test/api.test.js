@@ -46,7 +46,13 @@ test('auth: token required except health and docs', async () => {
 
 test('openapi spec lists the routes', async () => {
   const spec = (await req('GET', '/docs/json')).body;
-  for (const p of ['/jobs', '/toc', '/jobs/{id}', '/jobs/{id}/result', '/jobs/{id}/retry']) assert.ok(spec.paths[p], p);
+  for (const p of ['/jobs', '/toc', '/jobs/{id}', '/jobs/{id}/result', '/jobs/{id}/retry', '/supported_sites']) assert.ok(spec.paths[p], p);
+});
+
+test('supported_sites: sorted domain list from the adapters', async () => {
+  const r = await req('GET', '/supported_sites');
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body, ['69shuba.com', 'novellunar.com', 'twkan.com', 'wfxs.tw']);
 });
 
 test('dedupe: identical active job is returned, different range is new', async () => {

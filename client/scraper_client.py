@@ -127,6 +127,10 @@ class ScraperClient:
     def cancel(self, job_id: str) -> dict:
         return self._req("DELETE", f"/jobs/{job_id}")[1]
 
+    def supported_sites(self) -> list[str]:
+        """Domains the scraper handles; a URL matches if its host is one of these or a subdomain."""
+        return self._req("GET", "/supported_sites")[1]
+
     def wait(self, job_id: str, poll: float = 15, timeout: float | None = None, on_update=None) -> dict:
         """Poll until the job finishes. Returns the final job. A blocked job
         (waiting on a human for a challenge) keeps waiting; the server fails
