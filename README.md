@@ -100,6 +100,22 @@ When a challenge shows up, the runner escalates in this order:
 A job can also name its own `notifyUrl` (plus `notifyKind`: `ntfy` or `json`) in
 `POST /jobs` or `POST /toc`. Its notice goes there as well as to `NOTIFY_URL`.
 
+Each target can have a secret: `NOTIFY_SECRET` for the global one, and
+`notifySecret` on the job (stored separately and never returned by the API).
+Don't reuse `API_TOKEN` for either.
+- `json`: the secret is an HMAC-SHA256 key and is never sent. Each notice has an
+  `X-Scraper-Signature: t=<unix seconds>,v1=<hex>` header, where `v1` is
+  `HMAC(secret, "<t>.<raw body>")`. Verify against the raw body, before parsing
+  the JSON, and reject old timestamps. `verify_signature()` in the Python client does both:
+
+  ```python
+  from scraper_client import verify_signature
+  if not verify_signature(SECRET, request.get_data(), request.headers.get("X-Scraper-Signature", "")):
+      abort(401)
+  ```
+- `ntfy`: ntfy can't check signatures, so the secret is sent as an access token
+  (`Authorization: Bearer tk_...`) for a protected topic.
+
 Every outcome is logged to `challenge_events`.
 
 ## Engines (`ENGINE=`)

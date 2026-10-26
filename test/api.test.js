@@ -137,6 +137,15 @@ test('notifyUrl: validated and kept with the job params', async () => {
   assert.equal(ok.body.params.notifyKind, 'json');
 });
 
+test('notifySecret: accepted but never echoed', async () => {
+  const body = { url: 'https://twkan.com/book/8.html', notifyUrl: 'https://example.com/hook', notifySecret: 's3cret-value' };
+  const a = await req('POST', '/jobs', body);
+  assert.equal(a.status, 202);
+  const seen = JSON.stringify([a.body, (await req('GET', `/jobs/${a.body.id}`)).body, (await req('GET', '/jobs')).body]);
+  assert.ok(!seen.includes('s3cret-value'));
+  assert.equal((await req('POST', '/jobs', { ...body, notifySecret: 'short' })).status, 400);
+});
+
 test('result paging slices chapters but keeps the total', async () => {
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(path.join(dataDir, 'scraper.db'));

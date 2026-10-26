@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { cnToNum, parseChapterNumber, stripLeadingHeader, groupChapters } from '../src/sites/common.js';
 import { siteSettings, effectiveDelay } from '../src/settings.js';
 import { adapterFor } from '../src/sites/index.js';
+import { sign } from '../src/notify.js';
 
 test('cnToNum', () => {
   assert.equal(cnToNum('199'), 199);
@@ -113,4 +114,10 @@ test('queue order: normal before low; queuedAbove drives yielding', async () => 
   assert.equal(jobs.queuedAbove(-1), false);
   assert.equal(jobs.nextQueued().id, low.id);
   jobs.finish(low.id, 'done');
+});
+
+test('notify signature: HMAC-SHA256 over "t.body"', () => {
+  // echo -n '1700000000.{"a":1}' | openssl dgst -sha256 -hmac key
+  assert.equal(sign('key', '{"a":1}', 1700000000),
+    't=1700000000,v1=a438e398bfafc57e4396bb7fc2304422f0f768e965d073ca313cb52e22e6ad03');
 });

@@ -54,6 +54,11 @@ const posInt = { type: 'integer', minimum: 1 };
 const notifyProps = {
   notifyUrl: { type: 'string', pattern: '^https?://', description: 'Also send this job\'s "blocked" notice here (ntfy topic or webhook)' },
   notifyKind: { type: 'string', enum: ['ntfy', 'json'], description: 'Body format for notifyUrl (default ntfy)' },
+  notifySecret: {
+    type: 'string', minLength: 8, writeOnly: true,
+    description: 'json: HMAC key for the X-Scraper-Signature header (never sent). ntfy: access token sent as ' +
+      'Authorization: Bearer. Stored with the job but never returned.',
+  },
 };
 const idParams = { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] };
 const error = { type: 'object', properties: { error: { type: 'string' } }, additionalProperties: true };
@@ -162,8 +167,9 @@ const enqueue = (reply, kind, adapter, params) => {
   const key = dedupeKey(kind, adapter.name, params);
   const existing = jobs.findActive(key);
   if (existing) return reply.code(200).send(view(existing, { deduped: true }));
-  const { priority = 'normal', ...rest } = params;
-  const job = jobs.create(crypto.randomUUID(), adapter.name, rest, { kind, dedupeKey: key, priority: PRIORITY[priority] });
+  const { priority = 'normal', notifySecret, ...rest } = params;
+  const job = jobs.create(crypto.randomUUID(), adapter.name, rest,
+    { kind, dedupeKey: key, priority: PRIORITY[priority], notifySecret });
   kick();
   return reply.code(202).send(view(job));
 };

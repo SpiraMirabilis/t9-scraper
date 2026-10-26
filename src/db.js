@@ -56,6 +56,7 @@ for (const [col, ddl] of [
   ['dedupe_key', `ALTER TABLE jobs ADD COLUMN dedupe_key TEXT`],                // site + canonical params
   ['result', `ALTER TABLE jobs ADD COLUMN result TEXT`],                        // JSON, for kinds without pages (toc)
   ['priority', `ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0`], // 0 normal, -1 low (backfills)
+  ['notify_secret', `ALTER TABLE jobs ADD COLUMN notify_secret TEXT`],          // kept out of params so it's never echoed
 ]) if (!jobCols.has(col)) db.exec(ddl);
 db.exec(`CREATE INDEX IF NOT EXISTS jobs_dedupe ON jobs (dedupe_key, status)`);
 
@@ -77,11 +78,12 @@ const rowToJob = (r) => r && {
   startedAt: r.started_at || undefined,
   finishedAt: r.finished_at || undefined,
   result: r.result ? parse(r.result, null) : undefined,
+  notifySecret: r.notify_secret || undefined,
 };
 
 const q = {
-  insert: db.prepare(`INSERT INTO jobs (id, kind, site, params, dedupe_key, priority, status, created_at)
-                      VALUES (?, ?, ?, ?, ?, ?, 'queued', ?)`),
+  insert: db.prepare(`INSERT INTO jobs (id, kind, site, params, dedupe_key, priority, notify_secret, status, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)`),
   queuedAbove: db.prepare(`SELECT 1 FROM jobs WHERE status = 'queued' AND priority > ? LIMIT 1`),
   findActive: db.prepare(`SELECT * FROM jobs WHERE dedupe_key = ? AND status IN ('queued', 'running', 'blocked')
                           ORDER BY created_at ASC LIMIT 1`),
@@ -114,8 +116,8 @@ const q = {
 };
 
 export const jobs = {
-  create(id, site, params, { kind = 'chapters', dedupeKey = null, priority = 0 } = {}) {
-    q.insert.run(id, kind, site, JSON.stringify(params), dedupeKey, priority, now());
+  create(id, site, params, { kind = 'chapters', dedupeKey = null, priority = 0, notifySecret = null } = {}) {
+    q.insert.run(id, kind, site, JSON.stringify(params), dedupeKey, priority, notifySecret, now());
     return this.get(id);
   },
   // The oldest queued/running/blocked job with this key, if any.

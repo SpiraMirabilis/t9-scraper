@@ -40,4 +40,6 @@ export const config = {
   // ntfy topic URL or generic webhook; empty = log only.
   notifyUrl: env.NOTIFY_URL || '',
   notifyKind: env.NOTIFY_KIND || 'ntfy', // 'ntfy' (text + headers) | 'json'
+  // json: HMAC key for X-Scraper-Signature; ntfy: access token (Bearer). Never API_TOKEN.
+  notifySecret: env.NOTIFY_SECRET || '',
 };
