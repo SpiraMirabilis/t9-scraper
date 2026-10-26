@@ -1,0 +1,11 @@
+{
+  "engines": ["patchright", "extension"],
+  "initialBacklog": 3,
+  "maxChaptersPerRun": 20,
+  "books": [
+    { "label": "twkan example", "url": "https://twkan.com/book/123539.html" },
+    { "label": "69shuba example", "url": "https://www.69shuba.com/book/90412.htm" },
+    { "label": "novellunar example", "url": "https://novellunar.com/novel/copy-skills-with-affinity" },
+    { "label": "wfxs example", "url": "https://www.wfxs.tw/xiaoshuo/12345/" }
+  ]
+}

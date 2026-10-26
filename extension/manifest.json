@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Scraper Bridge",
+  "version": "0.1.0",
+  "description": "Connects this browser to the local chapter scraper.",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://*.twkan.com/*",
+    "https://*.wfxs.tw/*",
+    "https://*.novellunar.com/*",
+    "https://*.69shuba.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

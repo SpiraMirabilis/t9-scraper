@@ -1,0 +1,12 @@
+[Unit]
+Description=Scraper engine bake-off run (one engine, all books)
+Requires=scraper.service
+After=scraper.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/scraper
+EnvironmentFile=%h/scraper/.env
+ExecStart=/usr/bin/node scripts/bakeoff-run.js
+# A run waits on blocked jobs; the server fails them after CHALLENGE_TIMEOUT_MS.
+TimeoutStartSec=6h

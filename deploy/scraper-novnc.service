@@ -1,0 +1,12 @@
+[Unit]
+Description=Scraper noVNC (browser VNC, tailnet IP only)
+Requires=scraper-vnc.service
+After=scraper-vnc.service tailscaled.service
+
+[Service]
+ExecStart=/usr/bin/websockify --web /usr/share/novnc 100.65.58.103:6080 localhost:5900
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

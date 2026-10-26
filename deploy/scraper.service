@@ -1,0 +1,16 @@
+[Unit]
+Description=Chapter scraper API
+Requires=scraper-xvfb.service
+After=scraper-xvfb.service tailscaled.service network-online.target
+
+[Service]
+WorkingDirectory=%h/scraper
+EnvironmentFile=%h/scraper/.env
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning src/server.js
+Restart=on-failure
+RestartSec=10
+# Give Chrome time to close cleanly.
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

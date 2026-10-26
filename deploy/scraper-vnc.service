@@ -1,0 +1,12 @@
+[Unit]
+Description=Scraper VNC server (loopback only; reached through noVNC)
+Requires=scraper-xvfb.service
+After=scraper-xvfb.service
+
+[Service]
+ExecStart=/usr/bin/x11vnc -display :99 -localhost -rfbport 5900 -rfbauth %h/.vnc/passwd -forever -shared -quiet
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

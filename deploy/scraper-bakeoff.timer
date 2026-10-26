@@ -1,0 +1,12 @@
+[Unit]
+Description=Twice-daily scraper bake-off runs
+
+[Timer]
+# Morning and evening; the run script alternates engines between them.
+OnCalendar=*-*-* 08:30
+OnCalendar=*-*-* 20:30
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

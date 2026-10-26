@@ -1,0 +1,5 @@
+{
+  "twkan": { "delayMs": 4500, "minDelayMs": 4000 },
+  "wfxs": { "delayMs": 2500 },
+  "novellunar": { "challengeClicks": 3 }
+}

@@ -1,0 +1,9 @@
+[Unit]
+Description=Scraper virtual display (Xvfb :99)
+
+[Service]
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1600x1000x24 -nolisten tcp
+Restart=always
+
+[Install]
+WantedBy=default.target
