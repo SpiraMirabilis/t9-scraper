@@ -1,10 +1,12 @@
 [Unit]
-Description=Scraper noVNC (browser VNC, tailnet IP only)
+Description=Scraper noVNC (browser VNC; NOVNC_BIND in .env, loopback by default)
 Requires=scraper-vnc.service
 After=scraper-vnc.service tailscaled.service
 
 [Service]
-ExecStart=/usr/bin/websockify --web /usr/share/novnc 100.65.58.103:6080 localhost:5900
+Environment=NOVNC_BIND=127.0.0.1
+EnvironmentFile=-%h/scraper/.env
+ExecStart=/usr/bin/websockify --web /usr/share/novnc ${NOVNC_BIND}:6080 localhost:5900
 Restart=always
 RestartSec=5
 

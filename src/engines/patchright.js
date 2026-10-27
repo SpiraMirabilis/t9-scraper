@@ -18,12 +18,12 @@ const launch = async () => {
   const profile = `${config.profileDir}-patchright`;
   fs.mkdirSync(profile, { recursive: true });
   const ctx = await chromium.launchPersistentContext(profile, {
-    channel: config.chromeChannel,
+    ...(config.chromeChannel ? { channel: config.chromeChannel } : { executablePath: config.chromePath }),
     headless: config.headless,
     viewport: null,
     // Playwright's default adds --no-sandbox: a security hole on a box that
     // visits ad-laden pages, and a flag real users never run with.
-    chromiumSandbox: true,
+    chromiumSandbox: config.chromeSandbox,
     env: { ...process.env, DISPLAY: config.display },
     args: [
       // Fill the Xvfb screen; there's no window manager to maximize for us.
@@ -89,6 +89,9 @@ export async function open() {
 }
 
 export const status = () => ({ launched: !!contextPromise });
+
+// Open the browser ahead of the first job (LAUNCH_ON_START).
+export async function warmup() { await getPage(); }
 
 export async function close() {
   if (!contextPromise) return;

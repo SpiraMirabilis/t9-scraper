@@ -1,0 +1,18 @@
+# Never bake secrets or local state into the image
+.env
+data/
+sites.json
+bakeoff/books.json
+bakeoff/state.json
+bakeoff/runs.jsonl
+
+# Local captures and reference userscripts
+*.html
+architect3.json
+/twkan.js
+/wfxs.js
+/novellunar.js
+
+.git/
+node_modules/
+**/__pycache__/

@@ -1,4 +1,4 @@
-// HTTP API for the translation VM. Listens on the tailnet address only.
+// HTTP API for the translation pipeline. Binds BIND_HOST (loopback by default).
 // Interactive docs (generated from the route schemas below): GET /docs
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -11,7 +11,7 @@ import { adapters, adapterFor } from './sites/index.js';
 import { allSiteSettings } from './settings.js';
 import { buildResult } from './runner.js';
 import { startWorker, kick, cancel, currentJobId } from './queue.js';
-import { engines, engineNames, defaultEngine, activeEngine, closeAll } from './engines/index.js';
+import { engines, engineNames, defaultEngine, activeEngine, closeAll, warmup } from './engines/index.js';
 
 const app = Fastify({
   logger: { level: 'info' },
@@ -36,7 +36,7 @@ await app.register(swaggerUi, { routePrefix: '/docs' });
 // Open without a token: health checks and the docs (which hold no secrets).
 const PUBLIC = (url) => url === '/health' || url === '/docs' || url.startsWith('/docs/');
 
-if (!config.apiToken) app.log.warn('API_TOKEN is not set: relying on tailnet ACLs alone');
+if (!config.apiToken) app.log.warn('API_TOKEN is not set: anyone who can reach the port can use the API');
 app.addHook('onRequest', async (req, reply) => {
   if (!config.apiToken || PUBLIC(req.url)) return;
   const got = Buffer.from(req.headers.authorization || '');
@@ -328,4 +328,5 @@ process.on('SIGTERM', shutdown);
 await app.listen({ host: config.host, port: config.port });
 // WORKER=0: API only, nothing runs queued jobs (maintenance, tests).
 if (process.env.WORKER !== '0') startWorker();
+if (config.launchOnStart) warmup().catch((err) => app.log.warn(`browser launch at startup failed: ${err.message}`));
 else app.log.warn('WORKER=0: jobs will queue but not run');

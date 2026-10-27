@@ -1,0 +1,39 @@
+# Chapter scraper: `docker compose up -d`, then open
+# http://localhost:6080/vnc.html to see its browser. See QUICKSTART-Docker.md.
+#
+# All state (job database, browser profiles, sites.json, .env secrets) lives
+# in ./data on the host.
+
+services:
+  scraper:
+    # `docker compose pull` fetches the published release; `up --build`
+    # builds this checkout instead. SCRAPER_VERSION pins a release (e.g. 0.3.0).
+    image: ghcr.io/spiramirabilis/t9-scraper:${SCRAPER_VERSION:-latest}
+    build: .
+    restart: unless-stopped
+    # Reaps the browser's exited child processes.
+    init: true
+    # Chrome needs more shared memory than Docker's 64 MB default.
+    shm_size: 1gb
+    # A fixed hostname, so the browser profile isn't seen as locked by
+    # another machine after the container is recreated.
+    hostname: scraper
+    # Chrome's sandbox needs user namespaces, which Docker's default seccomp
+    # profile blocks. Chrome then puts every page in its own, stricter seccomp
+    # sandbox. The alternative, CHROME_SANDBOX=0 in data/.env, runs pages
+    # unsandboxed (only the container's isolation remains).
+    security_opt:
+      - seccomp=unconfined
+      - no-new-privileges:true
+    ports:
+      # Loopback only. To reach either from another machine (e.g. T9's
+      # worker), see "Exposing it beyond this machine" in QUICKSTART-Docker.md.
+      - "127.0.0.1:8787:8787"   # API (and /docs)
+      - "127.0.0.1:6080:6080"   # noVNC
+    volumes:
+      - ./data:/data
+    environment:
+      # Run as this uid/gid instead of data/'s owner (set them in the .env
+      # file next to this one).
+      PUID: ${PUID:-}
+      PGID: ${PGID:-}

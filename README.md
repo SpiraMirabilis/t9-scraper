@@ -1,17 +1,39 @@
 # chapter-scraper
 
-Tailnet-only HTTP API that scrapes raw web-novel chapters on demand with a real,
-headed Chrome on a virtual display. The translation VM queues a job, polls it,
-and fetches the result: the same JSON shape the TamperMonkey scripts
-(`twkan.js`, `wfxs.js`, `novellunar.js`) export.
+An HTTP API that scrapes raw web-novel chapters on demand, using a real,
+headed Chrome on a virtual display. It's built to feed the
+[T9 translation pipeline](https://github.com/SpiraMirabilis/translate), but any
+client can use it. A client queues a job, polls it, and fetches the result:
+the same JSON shape the TamperMonkey scripts (`twkan.js`, `wfxs.js`,
+`novellunar.js`) export. When a site throws a challenge it can't clear, you
+solve it by hand in the scraper's browser over noVNC.
 
 ```
-translation VM ──HTTP (tailnet)──▶ API :8787 ──▶ SQLite job queue ──▶ runner ──▶ engine ──▶ Chrome on Xvfb :99
-                                                                                              ▲
-                                                 you ──browser──▶ noVNC :6080 ──▶ x11vnc ─────┘
+pipeline ──HTTP──▶ API :8787 ──▶ SQLite job queue ──▶ runner ──▶ engine ──▶ Chrome on Xvfb :99
+                                                                                 ▲
+                                    you ──browser──▶ noVNC :6080 ──▶ x11vnc ─────┘
 ```
 
-## Setup
+Run it somewhere with a residential IP (a home server or desktop). Data-center
+IPs get Cloudflare challenges on nearly every page.
+
+## Docker
+
+The quickest way to run it: see [QUICKSTART-Docker.md](QUICKSTART-Docker.md).
+If you run T9 in Docker on the same machine, T9's `compose.yaml` includes the
+scraper: `docker compose --profile scraper up -d` there.
+
+```bash
+mkdir -p t9-scraper/data && cd t9-scraper
+curl -fsSLO https://raw.githubusercontent.com/SpiraMirabilis/t9-scraper/main/compose.yaml
+docker compose up -d
+```
+
+## Setup without Docker
+
+Linux with systemd, Node 22.13+, and Google Chrome (or Chromium, see
+`deploy/scraper.env.example`). Clone to `~/scraper` (the systemd units assume
+that path), then:
 
 ```sh
 sudo apt install xvfb x11vnc novnc websockify xdotool
@@ -24,11 +46,30 @@ systemctl --user enable --now scraper-xvfb scraper-vnc scraper-novnc scraper
 loginctl enable-linger "$USER"             # keep user services running after logout
 ```
 
-noVNC: `http://100.65.58.103:6080/vnc.html`
+Everything listens on loopback by default. noVNC: `http://localhost:6080/vnc.html`.
+Add `LAUNCH_ON_START=1` to `.env` to open the browser at startup rather than
+on the first job.
+
+### Reaching it from another machine
+
+If the pipeline runs elsewhere, or you want to solve challenges from your
+phone, bind to a private network address. Never use a public one. With
+[Tailscale](https://tailscale.com), for example, use the box's tailnet IP in
+`.env`:
+
+```env
+BIND_HOST=100.x.y.z
+NOVNC_BIND=100.x.y.z
+VNC_URL="http://100.x.y.z:6080/vnc.html?autoconnect=1&resize=scale"
+API_TOKEN=...                               # always set one off loopback
+```
+
+The units order themselves after `tailscaled.service` when it exists, so the
+address is up before they bind. A LAN address works the same way.
 
 ## API
 
-Interactive docs: `http://100.65.58.103:8787/docs` (no token needed to read them).
+Interactive docs: `http://localhost:8787/docs` (no token needed to read them).
 All other routes except `/health` need `Authorization: Bearer $API_TOKEN`.
 
 | Route | |
@@ -65,10 +106,10 @@ Chapter exports list any skipped numbers in `numberGaps`.
 
 ### Python client
 
-`client/scraper_client.py` uses only the standard library. Copy it into the translation pipeline:
+`client/scraper_client.py` uses only the standard library. Copy it into your pipeline (T9 ships a copy):
 
 ```python
-sc = ScraperClient("http://100.65.58.103:8787", token=TOKEN)
+sc = ScraperClient("http://127.0.0.1:8787", token=TOKEN)
 toc = sc.toc(book_url)                                  # what's out there
 export = sc.chapters(book_url, from_chapter=have + 1)   # blocks until done
 
@@ -126,7 +167,9 @@ Every outcome is logged to `challenge_events`.
   extension talks to a loopback WebSocket, and keys and clicks go through
   `xdotool`. Google Chrome ignores `--load-extension`, so you install it once
   over noVNC: open `chrome://extensions`, turn on Developer mode, click "Load
-  unpacked", and pick `~/scraper/extension`.
+  unpacked", and pick the repo's `extension/` directory (`/app/extension` in
+  Docker). With `LAUNCH_ON_START=1` and `ENGINE=extension`, the browser opens
+  on `chrome://extensions` until the extension is installed.
 
 ## Bake-off
 

@@ -1,4 +1,4 @@
-// Engine B: plain Google Chrome with NO remote-debugging port and no CDP
+// Engine B: plain Chrome (or Chromium) with NO remote-debugging port and no CDP
 // client at all -- to the site it is just a person's browser. A small MV3
 // extension (extension/) connects back to a loopback WebSocket and carries
 // out commands: navigate, run in-page code, report the challenge widget's
@@ -9,6 +9,7 @@
 // extension/ via chrome://extensions -> Developer mode -> Load unpacked
 // (over noVNC). It stays installed in this engine's profile.
 import fs from 'node:fs';
+import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { WebSocketServer } from 'ws';
@@ -65,14 +66,19 @@ const send = (cmd, payload = {}, timeout = 30_000) => new Promise((resolve, reje
 
 const profileDir = () => `${config.profileDir}-extension`;
 
-const spawnChrome = () => {
+const chromeArgs = (...urls) => [
+  `--user-data-dir=${profileDir()}`,
+  '--no-first-run', '--no-default-browser-check',
+  '--window-position=0,0', `--window-size=${config.screen.width},${config.screen.height}`,
+  ...(config.chromeSandbox ? [] : ['--no-sandbox']),
+  ...config.chromeExtraArgs,
+  ...urls,
+];
+
+const spawnChrome = (...urls) => {
   fs.mkdirSync(profileDir(), { recursive: true });
-  chrome = spawn(config.chromePath, [
-    `--user-data-dir=${profileDir()}`,
-    '--no-first-run', '--no-default-browser-check',
-    '--window-position=0,0', `--window-size=${config.screen.width},${config.screen.height}`,
-    ...config.chromeExtraArgs,
-  ], { env: { ...process.env, DISPLAY: config.display }, stdio: 'ignore' });
+  chrome = spawn(config.chromePath, chromeArgs(...urls),
+    { env: { ...process.env, DISPLAY: config.display }, stdio: 'ignore' });
   chrome.on('exit', (code) => { console.log(`[extension] chrome exited (${code})`); chrome = null; });
 };
 
@@ -111,17 +117,17 @@ const moveMouse = async (x, y) => {
 };
 
 // Raise and focus the X window holding the work tab. Chrome names windows
-// "<active tab title> - Google Chrome"; match exactly, falling back to the
-// first visible Chrome window. Without a window manager, raising matters:
+// "<active tab title> - Google Chrome" (or "- Chromium"); match the title,
+// falling back to the first visible Chrome window. Without a window manager, raising matters:
 // clicks land on whatever window is on top.
 const focusWorkWindow = async () => {
   const { title } = (await send('focus')) || {};
-  const { stdout } = await xdo('search', '--onlyvisible', '--class', 'google-chrome').catch(() => ({ stdout: '' }));
+  const { stdout } = await xdo('search', '--onlyvisible', '--class', 'google-chrome|chromium').catch(() => ({ stdout: '' }));
   const ids = stdout.split('\n').filter(Boolean);
   let target = ids[0];
   for (const id of ids) {
     const { stdout: name } = await xdo('getwindowname', id).catch(() => ({ stdout: '' }));
-    if (title && name.trim() === `${title} - Google Chrome`) { target = id; break; }
+    if (title && /^(.*) - (Google Chrome|Chromium)$/.exec(name.trim())?.[1] === title) { target = id; break; }
   }
   if (!target) throw new Error('no Chrome window found on the display');
   await xdo('windowraise', target);
@@ -175,6 +181,32 @@ export async function open() {
 export async function reloadExtension() {
   await ensureConnected();
   await send('reload');
+}
+
+// Open Chrome ahead of the first job (LAUNCH_ON_START). Until the extension
+// is installed in the profile, open chrome://extensions so it's ready to load
+// over noVNC.
+const EXTENSION_DIR = path.resolve(import.meta.dirname, '..', '..', 'extension');
+const installed = () => ['Preferences', 'Secure Preferences'].some((f) => {
+  try { return fs.readFileSync(path.join(profileDir(), 'Default', f), 'utf8').includes(`"${EXTENSION_DIR}"`); }
+  catch { return false; }
+});
+
+export async function warmup() {
+  startServer();
+  for (let i = 0; i < 6 && !sock; i++) await sleep(500);
+  if (sock || chrome) return;
+  spawnChrome();
+  if (installed()) return;
+  // Chrome ignores chrome:// URLs on its command line, so type it in.
+  const { stdout } = await xdo('search', '--sync', '--onlyvisible', '--class', 'google-chrome|chromium');
+  const win = stdout.split('\n').find(Boolean);
+  await sleep(1500);
+  await xdo('windowfocus', '--sync', win);
+  await xdo('key', 'ctrl+l');
+  await xdo('type', '--delay', '20', 'chrome://extensions\n');
+  console.log('[extension] not installed: load it over noVNC (Developer mode -> Load unpacked -> ' +
+    `${EXTENSION_DIR})`);
 }
 
 export const status = () => ({ connected: !!sock, chromeSpawned: !!chrome, wsPort: config.extensionWsPort });

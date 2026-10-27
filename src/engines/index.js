@@ -26,4 +26,7 @@ export async function activate(name) {
 
 export const activeEngine = () => active;
 
+// LAUNCH_ON_START: bring up the default engine's browser before any job.
+export async function warmup() { await (await activate()).warmup(); }
+
 export const closeAll = () => Promise.all(Object.values(engines).map((e) => e.close().catch(() => {})));

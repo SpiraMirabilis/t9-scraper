@@ -1,8 +1,8 @@
 {
   "name": "chapter-scraper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Tailnet-only API that drives a real Chrome to scrape raw web-novel chapters on demand.",
+  "description": "HTTP API that drives a real Chrome to scrape raw web-novel chapters on demand.",
   "type": "module",
   "main": "src/server.js",
   "engines": {

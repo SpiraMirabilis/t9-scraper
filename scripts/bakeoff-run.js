@@ -22,7 +22,8 @@ const DIR = typeof flag('dir') === 'string' ? path.resolve(flag('dir')) : path.r
 const BOOKS = path.join(DIR, 'books.json');
 const STATE = path.join(DIR, 'state.json');
 const RUNS = path.join(DIR, 'runs.jsonl');
-const API = process.env.BAKEOFF_API || `http://${process.env.BIND_HOST || '100.65.58.103'}:${process.env.PORT || 8787}`;
+const host = (process.env.BIND_HOST || '127.0.0.1').replace(/^0\.0\.0\.0$/, '127.0.0.1');
+const API = process.env.BAKEOFF_API || `http://${host}:${process.env.PORT || 8787}`;
 const TOKEN = process.env.API_TOKEN || '';
 
 if (!fs.existsSync(BOOKS)) {
