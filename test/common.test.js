@@ -98,6 +98,9 @@ test('site routing', () => {
   assert.equal(adapterFor('https://ixdzs.tw/read/557034/p1.html').name, 'ixdzs');
   assert.equal(adapterFor('https://ixdzs8.com/read/557034/p1.html').bookId(new URL('https://ixdzs8.com/read/557034/p1.html')), '557034');
   assert.equal(adapterFor('https://ixdzs8.com/sort/9/'), null);
+  assert.equal(adapterFor('https://uukanshu.cc/book/22768/').name, 'uukanshu');
+  assert.equal(adapterFor('https://uukanshu.cc/book/22768/13954479.html').bookId(new URL('https://uukanshu.cc/book/22768/13954479.html')), '22768');
+  assert.equal(adapterFor('https://uukanshu.cc/class_2_1.html'), null);
   assert.equal(adapterFor('https://evil-twkan.com/book/1.html'), null);
   assert.equal(adapterFor('https://twkan.com/'), null);
   assert.equal(adapterFor('not a url'), null);

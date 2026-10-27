@@ -18,7 +18,8 @@
     "https://*.biquge.tw/*",
     "https://*.ixdzs8.com/*",
     "https://*.ixdzs.tw/*",
-    "https://*.ixdzs.hk/*"
+    "https://*.ixdzs.hk/*",
+    "https://*.uukanshu.cc/*"
   ],
   "background": {
     "service_worker": "background.js"

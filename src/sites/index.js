@@ -5,8 +5,9 @@ import * as shuba69 from './shuba69.js';
 import * as novel543 from './novel543.js';
 import * as biquge from './biquge.js';
 import * as ixdzs from './ixdzs.js';
+import * as uukanshu from './uukanshu.js';
 
-export const adapters = [twkan, wfxs, novellunar, shuba69, novel543, biquge, ixdzs];
+export const adapters = [twkan, wfxs, novellunar, shuba69, novel543, biquge, ixdzs, uukanshu];
 
 export const adapterFor = (url) => {
   let u;
