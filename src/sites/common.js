@@ -139,7 +139,7 @@ export function makeCommon() {
       if (document.querySelector(
         '#cf-chl-widget, .cf-turnstile, iframe[src*="challenges.cloudflare.com"]')) return true;
       const t = (document.title || '').toLowerCase();
-      return /just a moment|attention required|checking your browser|verify you are human|请稍|訪問驗證|访问验证|人机验证|人機驗證|安全验证|安全驗證/.test(t);
+      return /just a moment|attention required|checking your browser|verify you are human|请稍|訪問驗證|访问验证|人机验证|人機驗證|安全验证|安全驗證|验证浏览器|驗證瀏覽器/.test(t);
     },
     firstMatch(selectors) {
       for (const sel of selectors) {

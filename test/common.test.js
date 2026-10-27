@@ -88,6 +88,16 @@ test('site routing', () => {
   assert.equal(adapterFor('https://www.novel543.com/12098050571/dir').name, 'novel543');
   assert.equal(adapterFor('https://novel543.com/12098050571/8095_1.html').bookId(new URL('https://novel543.com/12098050571/8095_1.html')), '12098050571');
   assert.equal(adapterFor('https://www.novel543.com/bookstack/xuanhuan/'), null);
+  assert.equal(adapterFor('https://www.biquge.tw/book/3094756.html').name, 'biquge');
+  assert.equal(adapterFor('https://m.biquge.tw/book/3094756/').name, 'biquge');
+  assert.equal(adapterFor('https://www.biquge.tw/book/3094756/80342188.html').bookId(new URL('https://www.biquge.tw/book/3094756/80342188.html')), '3094756');
+  assert.equal(adapterFor('https://www.biquge.tw/book/3094756.html').bookId(new URL('https://www.biquge.tw/book/3094756.html')), '3094756');
+  assert.equal(adapterFor('https://www.biquge.tw/sort/xuanhuan/'), null);
+  assert.equal(adapterFor('https://biquge.tw.evil.com/book/1.html'), null);
+  assert.equal(adapterFor('https://ixdzs8.com/read/557034/').name, 'ixdzs');
+  assert.equal(adapterFor('https://ixdzs.tw/read/557034/p1.html').name, 'ixdzs');
+  assert.equal(adapterFor('https://ixdzs8.com/read/557034/p1.html').bookId(new URL('https://ixdzs8.com/read/557034/p1.html')), '557034');
+  assert.equal(adapterFor('https://ixdzs8.com/sort/9/'), null);
   assert.equal(adapterFor('https://evil-twkan.com/book/1.html'), null);
   assert.equal(adapterFor('https://twkan.com/'), null);
   assert.equal(adapterFor('not a url'), null);
