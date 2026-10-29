@@ -315,6 +315,34 @@ app.post('/nu/releases', {
   return enqueue(reply, 'nu', nuAdapter, { op: 'addRelease', ...req.body });
 });
 
+const seriesRef = { type: 'string', minLength: 1, description: 'NU series URL or slug' };
+
+app.post('/nu/series-info', {
+  schema: nuJob('Read a series page: id, title, associated names, newest releases',
+    'Result: {id, title, slug, url, associatedNames: [string], releases: [{date, group, groupUrl, release}]} ' +
+    '(releases: the first page of the table, newest first). No login needed.',
+    { type: 'object', required: ['series'], additionalProperties: false, properties: { series: seriesRef } }),
+}, async (req, reply) => enqueue(reply, 'nu', nuAdapter, { op: 'seriesInfo', series: req.body.series }));
+
+const nameList = { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 300 } };
+app.post('/nu/associated-names', {
+  schema: nuJob('Add names to (or remove names from) a series\' Associated Names',
+    'Merges into the current list, keeping everyone else\'s entries (names compare ignoring case, spaces and ' +
+    'punctuation, so re-adding one changes nothing). Uses the series page\'s Edit/Save, then reloads the page ' +
+    'to check the result. Result: {status: updated | unchanged | dry_run, series, before, after, saved?, ' +
+    'screenshot?}. Fails if NU kept something other than what was sent.',
+    {
+      type: 'object', required: ['series'], additionalProperties: false,
+      anyOf: [{ required: ['add'] }, { required: ['remove'] }],
+      properties: {
+        series: seriesRef,
+        add: { ...nameList, description: 'Names to add (e.g. our English title, the Traditional raw title)' },
+        remove: { ...nameList, description: 'Names to drop' },
+        dryRun: { type: 'boolean', default: false, description: 'Work out the new list, but don\'t save it' },
+      },
+    }),
+}, async (req, reply) => enqueue(reply, 'nu', nuAdapter, { op: 'associatedNames', ...req.body }));
+
 app.post('/nu/release-search', {
   schema: nuJob('Find a series in the add-release form (approved or still pending)',
     'Types title into /add-release/\'s Series box, which searches NU\'s whole database, including series ' +

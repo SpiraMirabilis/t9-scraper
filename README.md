@@ -160,6 +160,8 @@ The login lives in the Patchright profile; jobs log in again when it lapses.
 | `GET /nu/group/series` | The stored list (no browser) |
 | `POST /nu/release-search` | `{title}`: search the add-release form's Series box, which also finds series still awaiting approval (no public page yet). Result `{match: {id, title} \| null, ambiguous, hits}` |
 | `POST /nu/releases` | `{series \| seriesId+seriesTitle, release, link, date?, dryRun?, force?}`: post a release (`release` is NU's label, e.g. `c12`, `v2c10`). Name a pending series by the id from `/nu/release-search` |
+| `POST /nu/series-info` | `{series}`: a series page's id, title, associated names and newest releases |
+| `POST /nu/associated-names` | `{series, add?, remove?, dryRun?}`: add or remove Associated Names, keeping everyone else's; the page is reloaded to check the save |
 | `POST /nu/series` | `{title, associatedNames, genres, ...}`: submit a new series (search first). Unknown genre/tag/type/language names fail before anything is sent |
 | `POST /nu/vocabulary` | The genre, tag, type and language names (with NU ids) that `POST /nu/series` accepts. Cache it |
 | `POST /nu/login` | Log in now (setup; other jobs log in by themselves) |

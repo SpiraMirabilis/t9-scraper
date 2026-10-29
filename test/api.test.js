@@ -288,3 +288,17 @@ test('nu: submission log and screenshots', async () => {
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('content-type'), 'image/png');
 });
+
+test('nu: series-info and associated-names validate and queue', async () => {
+  const i = await req('POST', '/nu/series-info', { series: 'the-law-abiding-necromancer' });
+  assert.equal(i.status, 202);
+  assert.deepEqual(i.body.params, { op: 'seriesInfo', series: 'the-law-abiding-necromancer' });
+  const body = { series: 'the-law-abiding-necromancer', add: ['我，死靈法師，遵紀守法'] };
+  const a = await req('POST', '/nu/associated-names', body);
+  assert.equal(a.status, 202);
+  assert.deepEqual(a.body.params, { op: 'associatedNames', ...body, dryRun: false });
+  assert.equal((await req('POST', '/nu/associated-names', body)).body.id, a.body.id);
+  for (const bad of [
+    { series: 'x' }, { add: ['a'] }, { series: 'x', add: [''] }, { series: 'x', names: ['a'] },
+  ]) assert.equal((await req('POST', '/nu/associated-names', bad)).status, 400, JSON.stringify(bad));
+});

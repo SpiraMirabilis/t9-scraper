@@ -147,6 +147,37 @@ export function makeSite(common) {
       sel.dispatchEvent(new Event('change', { bubbles: true }));
       return [...want.values()];
     },
+    // --- Series page in-place edits (seriesedit.js) --------------------------
+    // Edit runs editme(), which swaps <div id=field> for a <textarea id=field>
+    // (one entry per line) and the link for Save. Save runs saveedit(): an
+    // ajax post, after which the div comes back holding what NU stored.
+    startEdit(field) {
+      const btn = [...document.querySelectorAll('span.editme')]
+        .find((s) => (s.getAttribute('onclick') || '').includes(`editme(this,'${field}')`) && textOf(s) === 'Edit');
+      if (!btn) return false;
+      btn.click();
+      return document.getElementById(field)?.tagName === 'TEXTAREA';
+    },
+    setEditValue({ field, value }) {
+      const ta = document.getElementById(field);
+      if (!ta || ta.tagName !== 'TEXTAREA') return false;
+      ta.value = value;
+      return true;
+    },
+    saveEdit(field) {
+      const btn = [...document.querySelectorAll('span.editme')]
+        .find((s) => (s.getAttribute('onclick') || '').includes(`saveedit(this,'${field}')`));
+      if (!btn) return false;
+      btn.click();
+      return true;
+    },
+    // null while the textarea is still up (saving); then the lines shown.
+    editResult(field) {
+      const el = document.getElementById(field);
+      if (!el || el.tagName === 'TEXTAREA') return null;
+      return (el.innerText || el.textContent || '').split('\n').map((s) => s.trim()).filter(Boolean);
+    },
+
     // Everything /add-series/ offers to pick from: all on the page (the tag
     // box is select2 over a plain <select>, no ajax).
     vocabulary() {

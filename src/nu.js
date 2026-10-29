@@ -226,6 +226,77 @@ async function submitAndRecord(ctx, kind, target, label, detail) {
   return { message, reply, screenshot: after };
 }
 
+// A series URL or bare slug -> slug.
+const seriesSlug = (series) => {
+  const slug = slugOf(series) || (/^[a-z0-9-]+$/i.test(series) ? series : null);
+  if (!slug) throw new Error(`not a NovelUpdates series: ${series}`);
+  return slug;
+};
+
+async function readSeries(ctx, goto, slug) {
+  const url = `${BASE}/series/${slug}/`;
+  await goto(url);
+  const info = await ctx.call('seriesInfo');
+  if (!info.id) throw new Error(`no series at ${url}`);
+  return { ...info, slug, url };
+}
+
+// A series page: its NU id, title, associated names and the newest releases.
+export async function seriesInfo(ctx, { series }) {
+  return readSeries(ctx, pacedGoto(ctx), seriesSlug(series));
+}
+
+// Add names to (or drop names from) a series' Associated Names, keeping
+// everyone else's. Names compare ignoring case, spaces and punctuation
+// (normTitle), so re-adding one is a no-op. NU's in-place editor: Edit, fill
+// the textarea one name per line, Save; then the page is reloaded to check
+// the change stuck. Returns status: updated | unchanged | dry_run.
+export async function associatedNames(ctx, { series, add = [], remove = [], dryRun }) {
+  const slug = seriesSlug(series);
+  const goto = pacedGoto(ctx);
+  await ensureSession(ctx, goto);
+  const info = await readSeries(ctx, goto, slug);
+  const before = info.associatedNames;
+  const drop = new Set(remove.map(normTitle));
+  const after = before.filter((n) => !drop.has(normTitle(n)));
+  for (const n of add.map((x) => x.trim()).filter(Boolean)) {
+    if (!after.some((m) => normTitle(m) === normTitle(n)) && !drop.has(normTitle(n))) after.push(n);
+  }
+  const out = { series: { title: info.title, slug, id: info.id }, before, after };
+  if (after.length === before.length && after.every((n, i) => n === before[i])) return { status: 'unchanged', ...out };
+  if (dryRun) return { status: 'dry_run', ...out };
+
+  if (!(await ctx.call('startEdit', 'editassociated'))) throw new Error('no Edit link for Associated Names (logged out?)');
+  if (!(await ctx.call('setEditValue', { field: 'editassociated', value: after.join('\n') }))) throw new Error('the Associated Names box did not open');
+  const sub = nuSubmissions.start('names', slug, '', ctx.job.id, { before, after });
+  if (!(await ctx.call('saveEdit', 'editassociated'))) {
+    nuSubmissions.finish(sub, 'failed', { before, after, error: 'no Save link' });
+    throw new Error('no Save link for Associated Names');
+  }
+  let shown = null;
+  for (const t0 = Date.now(); !shown; await ctx.sleep(500)) {
+    shown = await ctx.call('editResult', 'editassociated');
+    if (!shown && Date.now() - t0 > 30_000) {
+      nuSubmissions.finish(sub, 'failed', { before, after, error: 'no reply to Save' });
+      throw new Error('NovelUpdates did not answer the Associated Names save within 30s; check the series page');
+    }
+  }
+  // What NU shows after a reload is what it kept.
+  const saved = (await readSeries(ctx, goto, slug)).associatedNames;
+  const screenshot = await snap(ctx, 'names', 'saved');
+  const want = new Set(after.map(normTitle)), got = new Set(saved.map(normTitle));
+  const missing = after.filter((n) => !got.has(normTitle(n)));
+  const extra = saved.filter((n) => !want.has(normTitle(n)));
+  const detail = { before, after, shown, saved, screenshot };
+  if (missing.length || extra.length) {
+    nuSubmissions.finish(sub, 'failed', { ...detail, missing, extra });
+    throw new Error(`Associated Names didn't save as sent (missing: ${missing.join(', ') || 'none'}; ` +
+      `unexpected: ${extra.join(', ') || 'none'}); see ${screenshot}`);
+  }
+  nuSubmissions.finish(sub, 'submitted', detail);
+  return { status: 'updated', ...out, saved, screenshot };
+}
+
 async function openAddRelease(ctx, goto) {
   await goto(`${BASE}/add-release/`);
   if (!(await ctx.call('hasForm', 'arrelease'))) throw new Error(`no add-release form (${(await ctx.call('pageText')).slice(0, 200)})`);
@@ -258,15 +329,12 @@ export async function addRelease(ctx, { series, seriesId, seriesTitle, release, 
   let info, slug = null, target;
 
   if (series) {
-    slug = slugOf(series) || (/^[a-z0-9-]+$/i.test(series) ? series : null);
-    if (!slug) throw new Error(`not a NovelUpdates series: ${series}`);
+    slug = seriesSlug(series);
     const prior = checkPrior('release', slug, label, force);
     if (prior) return prior;
     await ensureSession(ctx, goto);
-    const seriesUrl = `${BASE}/series/${slug}/`;
-    await goto(seriesUrl);
-    info = await ctx.call('seriesInfo');
-    if (!info.id) throw new Error(`no series at ${seriesUrl}`);
+    info = await readSeries(ctx, goto, slug);
+    const seriesUrl = info.url;
     // Posted by id while the series was pending?
     const byId = checkPrior('release', `id:${info.id}`, label, force);
     if (byId) return byId;
@@ -378,4 +446,4 @@ export async function vocabulary(ctx) {
   return { fetchedAt: new Date().toISOString(), ...v };
 }
 
-export const ops = { login, syncGroup, search, releaseSearch, addRelease, addSeries, vocabulary };
+export const ops = { login, syncGroup, search, releaseSearch, addRelease, addSeries, vocabulary, seriesInfo, associatedNames };
