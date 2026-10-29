@@ -1,10 +1,15 @@
 [Unit]
-Description=Scraper VNC server (loopback only; reached through noVNC)
+Description=Scraper VNC server (unix socket only; reached through scraper-novnc)
 Requires=scraper-xvfb.service
 After=scraper-xvfb.service
 
 [Service]
-ExecStart=/usr/bin/x11vnc -display :99 -localhost -rfbport 5900 -rfbauth %h/.vnc/passwd -forever -shared -quiet
+# No VNC password: the socket's 0700 directory keeps other users out, and
+# scraper-novnc asks for VNC_PASSWORD before it proxies anyone in.
+RuntimeDirectory=scraper-vnc
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/x11vnc -display :99 -unixsock %t/scraper-vnc/sock -rfbport 0 -rfbportv6 -1 -noipv6 -nopw -forever -shared -quiet
 Restart=always
 RestartSec=2
 

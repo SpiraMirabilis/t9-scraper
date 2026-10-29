@@ -27,12 +27,12 @@ if [ "$(id -u)" = "0" ]; then
     # First start: generate the secrets a fresh install needs.
     if [ ! -e "$ENVFILE" ]; then
         token=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
-        vncpw=$(node -e "console.log(require('crypto').randomBytes(6).toString('base64url'))")
+        vncpw=$(node -e "console.log(require('crypto').randomBytes(12).toString('base64url'))")
         cat > "$ENVFILE" <<ENV
 # Scraper secrets and settings; read at every start. See QUICKSTART-Docker.md.
 # Clients send this as "Authorization: Bearer <API_TOKEN>".
 API_TOKEN=$token
-# noVNC password (VNC uses only the first 8 characters).
+# noVNC password (asked once per browser; see VNC_LOGIN_DAYS).
 VNC_PASSWORD=$vncpw
 # ntfy topic URL or JSON webhook for "blocked on a challenge" notices.
 NOTIFY_URL=
@@ -74,16 +74,12 @@ rm -f "/tmp/.X$screen-lock"
 keep Xvfb "$DISPLAY" -screen 0 "${SCREEN_WIDTH}x${SCREEN_HEIGHT}x24" -nolisten tcp
 for _ in $(seq 50); do [ -e "/tmp/.X11-unix/X$screen" ] && break; sleep 0.1; done
 
-if [ -n "$VNC_PASSWORD" ]; then
-    x11vnc -storepasswd "$VNC_PASSWORD" "$HOME/.vncpasswd" >/dev/null 2>&1
-    vncauth="-rfbauth $HOME/.vncpasswd"
-else
-    echo "WARNING: VNC_PASSWORD is not set — anyone who can reach port 6080 can use the browser." >&2
-    vncauth=-nopw
-fi
-# shellcheck disable=SC2086
-keep x11vnc -display "$DISPLAY" -localhost -rfbport 5900 $vncauth -forever -shared -quiet
-keep websockify --web /usr/share/novnc 0.0.0.0:6080 localhost:5900
+# x11vnc listens only on a socket in a private directory, without a password;
+# the noVNC gate (src/vnc-gate.js) asks for VNC_PASSWORD and proxies to it.
+export VNC_SOCKET="$HOME/.vnc/sock"
+mkdir -p "$HOME/.vnc" && chmod 700 "$HOME/.vnc"
+keep x11vnc -display "$DISPLAY" -unixsock "$VNC_SOCKET" -rfbport 0 -rfbportv6 -1 -noipv6 -nopw -forever -shared -quiet
+keep env NOVNC_BIND=0.0.0.0 node /app/src/vnc-gate.js
 
 [ -n "$API_TOKEN" ] || echo "WARNING: API_TOKEN is not set — anyone who can reach port 8787 can use the API." >&2
 

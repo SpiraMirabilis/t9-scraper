@@ -11,7 +11,7 @@ solve it by hand in the scraper's browser over noVNC.
 ```
 pipeline ──HTTP──▶ API :8787 ──▶ SQLite job queue ──▶ runner ──▶ engine ──▶ Chrome on Xvfb :99
                                                                                  ▲
-                                    you ──browser──▶ noVNC :6080 ──▶ x11vnc ─────┘
+                                    you ──browser──▶ noVNC gate :6080 ──▶ x11vnc ┘
 ```
 
 Run it somewhere with a residential IP (a home server or desktop). Data-center
@@ -36,10 +36,9 @@ Linux with systemd, Node 22.13+, and Google Chrome (or Chromium, see
 that path), then:
 
 ```sh
-sudo apt install xvfb x11vnc novnc websockify xdotool
-x11vnc -storepasswd ~/.vnc/passwd
+sudo apt install xvfb x11vnc novnc xdotool
 npm install
-cp deploy/scraper.env.example .env        # set API_TOKEN, NOTIFY_URL
+cp deploy/scraper.env.example .env        # set API_TOKEN, VNC_PASSWORD, NOTIFY_URL
 mkdir -p ~/.config/systemd/user && cp deploy/*.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now scraper-xvfb scraper-vnc scraper-novnc scraper
@@ -47,6 +46,10 @@ loginctl enable-linger "$USER"             # keep user services running after lo
 ```
 
 Everything listens on loopback by default. noVNC: `http://localhost:6080/vnc.html`.
+It asks for `VNC_PASSWORD` once, then remembers that browser for
+`VNC_LOGIN_DAYS` (a signed cookie, not the password); `/logout` forgets it.
+x11vnc itself listens only on a unix socket under `$XDG_RUNTIME_DIR`, with no
+password of its own: `src/vnc-gate.js` is the only way in.
 Add `LAUNCH_ON_START=1` to `.env` to open the browser at startup rather than
 on the first job.
 
@@ -62,6 +65,7 @@ BIND_HOST=100.x.y.z
 NOVNC_BIND=100.x.y.z
 VNC_URL="http://100.x.y.z:6080/vnc.html?autoconnect=1&resize=scale"
 API_TOKEN=...                               # always set one off loopback
+VNC_PASSWORD=...                            # likewise
 ```
 
 The units order themselves after `tailscaled.service` when it exists, so the

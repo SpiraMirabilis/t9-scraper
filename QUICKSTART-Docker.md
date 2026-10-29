@@ -47,7 +47,9 @@ cat data/.env
 
 - **`API_TOKEN`**: clients send it as `Authorization: Bearer <token>` (T9's
   `SCRAPER_TOKEN`).
-- **`VNC_PASSWORD`**: the password noVNC asks for.
+- **`VNC_PASSWORD`**: the password noVNC asks for. Each browser is asked
+  once, then remembered for 30 days (`VNC_LOGIN_DAYS`); change the password
+  to sign them all out.
 
 Set `NOTIFY_URL` there too if you want a push notification when a job needs
 you (an [ntfy](https://ntfy.sh) topic URL works). Other settings go in the

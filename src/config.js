@@ -52,6 +52,18 @@ export const config = {
 
   // Where a human goes to solve a challenge. Shown in job status and notices.
   vncUrl: env.VNC_URL || 'http://localhost:6080/vnc.html?autoconnect=1&resize=scale',
+  // The noVNC gate (src/vnc-gate.js), its own process. VNC_PASSWORD is asked
+  // once per browser; the gate then keeps a signed cookie for VNC_LOGIN_DAYS.
+  // Empty password = no login (anyone who can reach the port).
+  vncGate: {
+    host: env.NOVNC_BIND || '127.0.0.1',
+    port: int(env.NOVNC_PORT, 6080),
+    password: env.VNC_PASSWORD || '',
+    loginDays: int(env.VNC_LOGIN_DAYS, 30),
+    // x11vnc's unix socket; its directory's 0700 is what keeps other users out.
+    socket: env.VNC_SOCKET || path.join(env.XDG_RUNTIME_DIR || '/tmp', 'scraper-vnc', 'sock'),
+    webDir: env.NOVNC_DIR || '/usr/share/novnc',
+  },
   // ntfy topic URL or generic webhook; empty = log only.
   notifyUrl: env.NOTIFY_URL || '',
   notifyKind: env.NOTIFY_KIND || 'ntfy', // 'ntfy' (text + headers) | 'json'

@@ -10,7 +10,7 @@ ARG TARGETARCH
 # fingerprint) like a reader's browser would.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-        ca-certificates curl xvfb x11vnc novnc websockify xdotool \
+        ca-certificates curl xvfb x11vnc novnc xdotool \
         fonts-noto-cjk fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/*
 
