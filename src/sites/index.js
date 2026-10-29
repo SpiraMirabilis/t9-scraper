@@ -6,10 +6,11 @@ import * as novel543 from './novel543.js';
 import * as biquge from './biquge.js';
 import * as ixdzs from './ixdzs.js';
 import * as uukanshu from './uukanshu.js';
+import * as shuku52 from './shuku52.js';
 import * as generic from './generic.js';
 import * as novelupdates from './novelupdates.js';
 
-export const adapters = [twkan, wfxs, novellunar, shuba69, novel543, biquge, ixdzs, uukanshu];
+export const adapters = [twkan, wfxs, novellunar, shuba69, novel543, biquge, ixdzs, uukanshu, shuku52];
 
 export const adapterFor = (url) => {
   let u;

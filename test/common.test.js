@@ -101,6 +101,11 @@ test('site routing', () => {
   assert.equal(adapterFor('https://uukanshu.cc/book/22768/').name, 'uukanshu');
   assert.equal(adapterFor('https://uukanshu.cc/book/22768/13954479.html').bookId(new URL('https://uukanshu.cc/book/22768/13954479.html')), '22768');
   assert.equal(adapterFor('https://uukanshu.cc/class_2_1.html'), null);
+  assert.equal(adapterFor('https://www.52shuku.net/chongsheng/6196.html').name, '52shuku');
+  assert.equal(adapterFor('https://www.52shuku.net/jiakong/22_b/bkc5y_2.html').bookId(new URL('https://www.52shuku.net/jiakong/22_b/bkc5y_2.html')), 'jiakong/22_b/bkc5y');
+  assert.equal(adapterFor('https://www.52shuku.net/jiakong/index_2.html'), null);
+  assert.equal(adapterFor('https://www.52shuku.net/zuozhe/iaTK.html'), null);
+  assert.equal(adapterFor('https://www.52shuku.net/about.html'), null);
   assert.equal(adapterFor('https://evil-twkan.com/book/1.html'), null);
   assert.equal(adapterFor('https://twkan.com/'), null);
   assert.equal(adapterFor('not a url'), null);
@@ -178,4 +183,22 @@ test('pruneCaptures keeps new-series screenshots for 7 days', async () => {
   assert.ok(fs.existsSync(capturePath('nu-0a1b-series-filled.png')));
   assert.ok(!fs.existsSync(capturePath('nu-0a1b-release-filled.png')));
   assert.ok(!fs.existsSync(capturePath('nu-0a1b-series-submitted.png')));
+});
+
+test('52shuku: book title, headings and page splitting', async () => {
+  const { parseBookTitle, isHeading, splitPage } = await import('../src/sites/shuku52.js');
+  assert.deepEqual(parseBookTitle('神仙弃地_予春焱【完结+番外】(2)'), { bookName: '神仙弃地', author: '予春焱' });
+  assert.deepEqual(parseBookTitle('BOSS作死指南_决绝【完结+番外】'), { bookName: 'BOSS作死指南', author: '决绝' });
+  assert.ok(isHeading('第1章 废仙还世'));
+  assert.ok(isHeading('番外一 重逢'));
+  assert.ok(isHeading('楔子'));
+  assert.ok(!isHeading('第一章写完了。'));
+  assert.ok(!isHeading('番外的故事就到这里了。'));
+  assert.ok(!isHeading('作者有话要说：'));
+  assert.deepEqual(splitPage(['a', '第2章 二', 'b', 'c', '第3章 三', 'd']), [
+    { title: null, lines: ['a'] },
+    { title: '第2章 二', lines: ['b', 'c'] },
+    { title: '第3章 三', lines: ['d'] },
+  ]);
+  assert.deepEqual(splitPage(['第1章 一', 'x']), [{ title: '第1章 一', lines: ['x'] }]);
 });

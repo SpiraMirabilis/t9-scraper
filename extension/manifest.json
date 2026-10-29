@@ -19,7 +19,8 @@
     "https://*.ixdzs8.com/*",
     "https://*.ixdzs.tw/*",
     "https://*.ixdzs.hk/*",
-    "https://*.uukanshu.cc/*"
+    "https://*.uukanshu.cc/*",
+    "https://*.52shuku.net/*"
   ],
   "background": {
     "service_worker": "background.js"

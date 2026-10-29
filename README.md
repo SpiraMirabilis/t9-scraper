@@ -93,12 +93,13 @@ return `200` with that job and `deduped: true` instead of starting a second copy
 
 How the chapter job fields work:
 - **`url`** can be a book page or a chapter page. The site is picked from the URL.
-- **`fromChapter`** is a TOC entry's `position`: the 1-based TOC position on twkan, wfxs, 69shuba, novel543, biquge, ixdzs and uukanshu, and the URL chapter number on novellunar. If that position doesn't exist (sources have gaps), the job starts at the next one that does.
+- **`fromChapter`** is a TOC entry's `position`: the 1-based TOC position on twkan, wfxs, 69shuba, novel543, biquge, ixdzs and uukanshu, the page number (第N页) on 52shuku, and the URL chapter number on novellunar. If that position doesn't exist (sources have gaps), the job starts at the next one that does.
 - **Defaults:** start at chapter 1, or at `url` if it's a chapter page, and run to the end of the book.
 - **`toChapter`** is inclusive and compared against the chapter number parsed from the title.
 - **`delayMs`** can only raise the site's pacing, never drop it below the floor.
 - **`priority: "low"`** is for backfills (a whole new book). Low jobs run only when nothing normal is queued, and step aside between pages when a normal job arrives, resuming later from their last captured page. Daily updates never wait behind a backfill.
 - **`engine`** picks the browser engine for this job; the default is `ENGINE`. The worker closes one engine's browser before starting the other.
+- **52shuku** cuts whole books into pages that ignore chapter breaks, so its TOC lists pages (第N页), not chapters, and the scraper finds the chapters by splitting the pages at their 第N章 / 番外 headings. The blurb before the first chapter is exported as `intro`. A job started mid-book skips the tail of the chapter it lands in.
 
 ### Page fetches
 

@@ -330,26 +330,32 @@ export async function runJob(job, control) {
     }
     if (!rec) return 'end'; // no body: walked off the end of the book
 
-    rec.url = await page.url();
-    const number = Number.isFinite(rec.number) ? rec.number : parseChapterNumber(rec.title);
-    const key = chapterKey(rec);
-    const isNewChapter = !key || key !== lastKey;
+    // A page that holds parts of several chapters (52shuku) comes back as an
+    // array of records, stored in order under the page's URL.
+    const pageUrl = await page.url();
+    for (const r of Array.isArray(rec) ? rec : [rec]) {
+      r.url = pageUrl;
+      const number = Number.isFinite(r.number) ? r.number : parseChapterNumber(r.title);
+      const key = chapterKey(r);
+      const isNewChapter = !key || key !== lastKey;
 
-    if (p.toChapter && Number.isFinite(number) && number > p.toChapter) return 'toChapter';
-    if (isNewChapter && p.maxChapters && chapters >= p.maxChapters) return 'maxChapters';
+      if (p.toChapter && Number.isFinite(number) && number > p.toChapter) return 'toChapter';
+      if (isNewChapter && p.maxChapters && chapters >= p.maxChapters) return 'maxChapters';
 
-    pages.add(job.id, rec);
-    if (isNewChapter) chapters++;
-    lastKey = key; lastUrl = rec.url;
-    const st = pages.stats(job.id);
-    ctx.progress({ ...st, chapters, lastUrl: rec.url, lastTitle: rec.title, lastChapter: number ?? undefined });
+      pages.add(job.id, r);
+      if (isNewChapter) chapters++;
+      lastKey = key;
+      const st = pages.stats(job.id);
+      ctx.progress({ ...st, chapters, lastUrl: pageUrl, lastTitle: r.title, lastChapter: number ?? undefined });
 
-    if (await adapter.isEndAfterCapture(ctx, rec)) return 'end';
-    // One page per chapter: we already know the range is complete.
-    if (adapter.onePagePerChapter) {
-      if (p.maxChapters && chapters >= p.maxChapters) return 'maxChapters';
-      if (p.toChapter && Number.isFinite(number) && number >= p.toChapter) return 'toChapter';
+      if (await adapter.isEndAfterCapture(ctx, r)) return 'end';
+      // One page per chapter: we already know the range is complete.
+      if (adapter.onePagePerChapter) {
+        if (p.maxChapters && chapters >= p.maxChapters) return 'maxChapters';
+        if (p.toChapter && Number.isFinite(number) && number >= p.toChapter) return 'toChapter';
+      }
     }
+    lastUrl = pageUrl;
 
     // Step aside, between pages, if something more urgent is queued.
     if (control.shouldYield?.()) throw new Yielded();
@@ -369,7 +375,7 @@ export function buildResult(job) {
     site: job.site,
     capturedAt: job.finishedAt || new Date().toISOString(),
     chapterCount: chapters.length,
-    pageCount: stored.length,
+    pageCount: new Set(stored.map((pg) => pg.url)).size, // 52shuku stores several rows per page
     source: (stored[0] && stored[0].url) || job.params.url,
     ...adapter.exportMeta(job.meta, job.params),
     numberGaps: numberGaps(chapters),

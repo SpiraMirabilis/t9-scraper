@@ -100,7 +100,7 @@ const createJobSchema = {
     additionalProperties: false,
     properties: {
       url: { type: 'string', minLength: 1, description: 'Book page or chapter page; the site is chosen from it' },
-      fromChapter: { ...posInt, description: 'TOC position (twkan, wfxs, 69shuba, novel543, biquge, ixdzs, uukanshu) or URL chapter number (novellunar); same as a TOC entry\'s position' },
+      fromChapter: { ...posInt, description: 'TOC position (twkan, wfxs, 69shuba, novel543, biquge, ixdzs, uukanshu), page number (52shuku) or URL chapter number (novellunar); same as a TOC entry\'s position' },
       fromUrl: { type: 'string', minLength: 1, description: 'Exact chapter page to start at' },
       toChapter: { ...posInt, description: 'Inclusive; compared with the chapter number parsed from the title' },
       maxChapters: posInt,
