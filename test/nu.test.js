@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normTitle, normLabel, newErrors, confirmation } from '../src/nu.js';
+import { normTitle, normLabel, newErrors, confirmation, addReleases } from '../src/nu.js';
+import { config } from '../src/config.js';
 import { nuSubmissions } from '../src/db.js';
 import { slugOf } from '../src/sites/novelupdates.js';
 
@@ -50,4 +51,76 @@ test('confirmation: NU\'s thank-you, only when the submit added it', () => {
   assert.equal(confirmation(intro, `${intro} ${thanks}`), thanks);
   assert.equal(confirmation(intro, intro), null);
   assert.equal(confirmation(`${intro} ${thanks}`, `${intro} ${thanks}`), null); // already on the page
+});
+
+// A stand-in for NU's pages, enough for the add-release flow: the reply to a
+// submit is the form again, picks kept, with a thank-you (or error) line.
+function fakeNu({ refuse = [] } = {}) {
+  const thanks = 'Thank you! Your submission should be approved within 24 hours.';
+  const s = { url: '', loads: [], picked: {}, fields: {}, notice: '', posted: [], onNav: null };
+  const ctx = {
+    job: { id: 'job-batch' }, settings: { delayMs: 0, jitter: 0 },
+    sleep: async () => {}, checkCancelled() {}, progress() {}, settle: async () => {},
+    async goto(url) {
+      s.url = url; s.loads.push(url.replace(/^https:\/\/www\.novelupdates\.com/, ''));
+      if (url.endsWith('/add-release/')) Object.assign(s, { picked: {}, fields: {}, notice: '' });
+    },
+    page: {
+      screenshot: async () => Buffer.from('png'),
+      waitForNavigation: () => new Promise((r) => { s.onNav = r; }),
+    },
+    async call(name, arg) {
+      switch (name) {
+        case 'loggedIn': return true;
+        case 'seriesInfo': return { title: 'Book', id: '900', associatedNames: [],
+          releases: [{ group: 'Ours', groupUrl: config.nu.groupUrl, release: 'c1' }] };
+        case 'groupInfo': return { name: 'Ours', id: '77' };
+        case 'hasForm': return s.url.endsWith('/add-release/');
+        case 'startPick': return true;
+        case 'pickResults': return [{ i: 0, text: arg.kind, id: arg.kind === 'group' ? '77' : '900' }];
+        case 'choosePick': return (s.picked[arg.kind] = arg.kind === 'group' ? '77' : '900');
+        case 'pickedIds': return { series: s.picked.series, group: s.picked.group };
+        case 'clearNotice': s.notice = ''; return 1;
+        case 'fill': Object.assign(s.fields, arg); return [];
+        case 'formValues': return { ...s.fields };
+        case 'pageText': return `Add Release ${s.notice}`;
+        case 'submitForm':
+          setTimeout(() => {
+            const bad = refuse.includes(s.fields.arrelease);
+            if (!bad) s.posted.push({ ...s.fields });
+            s.notice = bad ? 'Error: this release is a duplicate.' : thanks;
+            s.onNav(true);
+          }, 0);
+          return true;
+        default: throw new Error(`fake NU has no ${name}`);
+      }
+    },
+  };
+  return { s, ctx };
+}
+
+test('addReleases: one form for the batch, stops at the first failure', async () => {
+  config.nu.groupUrl = 'https://www.novelupdates.com/group/ours/';
+  const { s, ctx } = fakeNu({ refuse: ['c4'] });
+  const rel = (n, date) => ({ release: `c${n}`, link: `https://example.com/${n}`, ...(date ? { date } : {}) });
+  const res = await addReleases(ctx, { series: 'batch-book', releases: [rel(1), rel(2, '10/01/2026'), rel(3), rel(4), rel(5)] });
+  assert.equal(res.status, 'stopped');
+  assert.deepEqual(res.series, { title: 'Book', slug: 'batch-book', id: '900' });
+  assert.deepEqual(res.releases.map((r) => r.status), ['exists', 'submitted', 'submitted', 'failed', 'not_attempted']);
+  assert.equal(res.releases[0].live.release, 'c1');
+  assert.match(res.releases[3].error, /refused the release/);
+  assert.equal(res.submitted, 2);
+  // Series page, group page and form once each; c3 went out on c2's reply page.
+  assert.deepEqual(s.loads, ['/series/batch-book/', '/group/ours/', '/add-release/']);
+  // The date doesn't carry over to the next release.
+  assert.deepEqual(s.posted.map((f) => [f.arrelease, f.ardate]), [['c2', '10/01/2026'], ['c3', '']]);
+  assert.deepEqual(res.releases[2].screenshots, ['nu-job-batch-3-release-filled.png', 'nu-job-batch-3-release-submitted.png']);
+  assert.equal(nuSubmissions.latest('release', 'batch-book', 'c3').status, 'submitted');
+
+  // Sent again: the log settles c2 and c3 without loading a page.
+  const again = fakeNu();
+  const res2 = await addReleases(again.ctx, { series: 'batch-book', releases: [rel(2), rel(3)] });
+  assert.deepEqual(res2.releases.map((r) => r.status), ['already_submitted', 'already_submitted']);
+  assert.deepEqual(again.s.loads, []);
+  assert.equal(res2.status, 'done');
 });

@@ -24,11 +24,15 @@ const MAX_CANDIDATES = 5;
 // punctuation dropped ("我，死灵法师，遵纪守法" == "我 死灵法师 遵纪守法").
 export const normTitle = (s) => (s || '').normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
 
+// The site's delay plus jitter: between page loads, and between the submits
+// of a batch of releases.
+const pause = (ctx) => ctx.sleep(Math.round(ctx.settings.delayMs * (1 + Math.random() * ctx.settings.jitter)));
+
 // Page loads after the first wait the site's delay, like chapter pages do.
 const pacedGoto = (ctx) => {
   let first = true;
   return async (url) => {
-    if (!first) await ctx.sleep(Math.round(ctx.settings.delayMs * (1 + Math.random() * ctx.settings.jitter)));
+    if (!first) await pause(ctx);
     first = false;
     await ctx.goto(url);
   };
@@ -51,6 +55,16 @@ export async function ensureSession(ctx, goto = pacedGoto(ctx)) {
   }
   console.log(`[job ${ctx.job.id}] logged in to NovelUpdates as ${user}`);
   return true;
+}
+
+// Load a page that needs the login. Every page's header shows whether we're
+// logged in, so /login/ is visited only when this one says we aren't: one
+// page load fewer while the session lasts.
+async function gotoLoggedIn(ctx, goto, url) {
+  await goto(url);
+  if (await ctx.call('loggedIn')) return;
+  await ensureSession(ctx, goto);
+  await goto(url);
 }
 
 export async function login(ctx) {
@@ -117,9 +131,10 @@ const sameUrl = (a, b) => {
 // "V2C10 " and "v2c10" are the same release.
 export const normLabel = (s) => (s || '').toLowerCase().replace(/\s+/g, '');
 
-// kind: release | series. The name feeds SERIES_SHOT_RE.
-async function snap(ctx, kind, step) {
-  const file = `nu-${ctx.job.id}-${kind}-${step}.png`;
+// kind: release | series. The name feeds SERIES_SHOT_RE. `n` numbers the
+// releases of a batch.
+async function snap(ctx, kind, step, n) {
+  const file = `nu-${ctx.job.id}${n ? `-${n}` : ''}-${kind}-${step}.png`;
   fs.mkdirSync(SHOT_DIR, { recursive: true });
   fs.writeFileSync(path.join(SHOT_DIR, file), await ctx.page.screenshot({ fullPage: true }));
   return file;
@@ -144,7 +159,7 @@ async function boxSearch(ctx, kind, text) {
   if (!(await ctx.call('startPick', { kind, text }))) throw new Error(`no ${kind} box on the form`);
   const t0 = Date.now();
   for (;;) {
-    await ctx.sleep(500);
+    await ctx.sleep(250);
     const hits = await ctx.call('pickResults', { kind }); // null while "Loading..."
     if (hits) return hits;
     if (Date.now() - t0 > 15_000) throw new Error(`NU's ${kind} search for "${text}" didn't answer within 15s`);
@@ -193,7 +208,7 @@ export const newErrors = (before, after) => {
 // NU's confirmation, if the submit added one.
 export const confirmation = (before, after) =>
   (SUCCESS_RE.test(before) ? null : (after.match(SUCCESS_RE) || [])[0] || null);
-async function submitAndRecord(ctx, kind, target, label, detail) {
+async function submitAndRecord(ctx, kind, target, label, detail, n) {
   const before = await ctx.call('pageText');
   const sub = nuSubmissions.start(kind, target, label, ctx.job.id, detail);
   // The form posts back to its own URL (add-release reloads with the values
@@ -210,7 +225,7 @@ async function submitAndRecord(ctx, kind, target, label, detail) {
   }
   await ctx.settle();
   const reply = await ctx.call('pageText');
-  const after = await snap(ctx, kind, 'submitted');
+  const after = await snap(ctx, kind, 'submitted', n);
   const errors = newErrors(before, reply);
   if (errors.length) {
     nuSubmissions.finish(sub, 'failed', { ...detail, reply, screenshot: after });
@@ -233,9 +248,10 @@ const seriesSlug = (series) => {
   return slug;
 };
 
-async function readSeries(ctx, goto, slug) {
+// With `login`, logs in first if the page shows we aren't.
+async function readSeries(ctx, goto, slug, { login = false } = {}) {
   const url = `${BASE}/series/${slug}/`;
-  await goto(url);
+  await (login ? gotoLoggedIn(ctx, goto, url) : goto(url));
   const info = await ctx.call('seriesInfo');
   if (!info.id) throw new Error(`no series at ${url}`);
   return { ...info, slug, url };
@@ -254,8 +270,7 @@ export async function seriesInfo(ctx, { series }) {
 export async function associatedNames(ctx, { series, add = [], remove = [], dryRun }) {
   const slug = seriesSlug(series);
   const goto = pacedGoto(ctx);
-  await ensureSession(ctx, goto);
-  const info = await readSeries(ctx, goto, slug);
+  const info = await readSeries(ctx, goto, slug, { login: true });
   const before = info.associatedNames;
   const drop = new Set(remove.map(normTitle));
   const after = before.filter((n) => !drop.has(normTitle(n)));
@@ -298,7 +313,7 @@ export async function associatedNames(ctx, { series, add = [], remove = [], dryR
 }
 
 async function openAddRelease(ctx, goto) {
-  await goto(`${BASE}/add-release/`);
+  await gotoLoggedIn(ctx, goto, `${BASE}/add-release/`);
   if (!(await ctx.call('hasForm', 'arrelease'))) throw new Error(`no add-release form (${(await ctx.call('pageText')).slice(0, 200)})`);
 }
 
@@ -308,7 +323,6 @@ async function openAddRelease(ctx, goto) {
 // `title` (ignoring case, spaces and punctuation).
 export async function releaseSearch(ctx, { title }) {
   const goto = pacedGoto(ctx);
-  await ensureSession(ctx, goto);
   await openAddRelease(ctx, goto);
   const hits = (await boxSearch(ctx, 'series', title)).map(({ text, id }) => ({ id, title: text }));
   const exact = hits.filter((h) => h.id && normTitle(h.title) === normTitle(title));
@@ -316,54 +330,121 @@ export async function releaseSearch(ctx, { title }) {
   return { title, match: exact.length === 1 ? exact[0] : null, ambiguous: exact.length > 1, hits };
 }
 
-// Post a release. The series is either `series` (its NU URL or slug: the
-// series page gives its id, and the release table there is checked first) or
-// `seriesId` plus `seriesTitle` (from POST /nu/release-search: for a series
-// still awaiting approval, which has no page). `release` is NU's label ("c12",
-// "v2c10"), `link` our chapter URL, `date` (MM/DD/YYYY) only for a release
-// made before today. Returns status: exists | already_submitted | dry_run |
-// submitted.
-export async function addRelease(ctx, { series, seriesId, seriesTitle, release, link, date, dryRun, force }) {
-  const label = normLabel(release);
+// Post releases of one series in order, stopping at the first that fails.
+// The series is either `series` (its NU URL or slug: the series page gives
+// its id, and the release table there is checked first) or `seriesId` plus
+// `seriesTitle` (from POST /nu/release-search: for a series still awaiting
+// approval, which has no page). Each release is {release, link, date?}:
+// NU's label ("c12", "v2c10"), our chapter URL, and MM/DD/YYYY only for a
+// release made before today. Pages are loaded only once the log can't settle
+// a release by itself, and only once per batch: NU's reply to a submit is the
+// form again with the series and group still picked, so the next release
+// just refills the label, link and date. `numbered` numbers the screenshots
+// (batches). Returns {info: the series, or null if no page was needed,
+// results: one per release}: status exists | already_submitted | dry_run |
+// submitted, or failed (with error) and not_attempted after it.
+async function postReleases(ctx, { series, seriesId, seriesTitle, releases, dryRun, force, numbered }) {
   const goto = pacedGoto(ctx);
-  let info, slug = null, target;
+  const slug = series ? seriesSlug(series) : null;
+  // Without a series page the submission log is the only duplicate guard.
+  const target = slug || `id:${seriesId}`;
+  let info = null, group = null, formOpen = false, submits = 0;
 
-  if (series) {
-    slug = seriesSlug(series);
-    const prior = checkPrior('release', slug, label, force);
-    if (prior) return prior;
-    await ensureSession(ctx, goto);
-    info = await readSeries(ctx, goto, slug);
-    const seriesUrl = info.url;
-    // Posted by id while the series was pending?
+  const loadSeries = async () => {
+    // Login problems, a missing series or a block page fail the whole job:
+    // nothing has been submitted yet.
+    info = slug ? await readSeries(ctx, goto, slug, { login: true }) : { id: seriesId, title: seriesTitle };
+    group = await ourGroup(ctx, goto);
+  };
+  // Settled without posting? (Posted by id while the series was pending, or
+  // live in the release table's first page: the newest releases.)
+  const settled = (label) => {
+    if (!slug) return null;
     const byId = checkPrior('release', `id:${info.id}`, label, force);
     if (byId) return byId;
-    // Already live? (The table's first page: the newest releases.)
     const live = info.releases.find((r) => sameUrl(r.groupUrl, config.nu.groupUrl) && normLabel(r.release) === label);
-    if (live) return { status: 'exists', series: { title: info.title, url: seriesUrl, id: info.id }, release: live };
-    target = slug;
-  } else {
-    // No page to check, so the submission log is the only duplicate guard.
-    target = `id:${seriesId}`;
-    const prior = checkPrior('release', target, label, force);
-    if (prior) return prior;
-    await ensureSession(ctx, goto);
-    info = { id: seriesId, title: seriesTitle };
+    return live ? { status: 'exists', series: { title: info.title, url: info.url, id: info.id }, release: live } : null;
+  };
+  // The form, with our series and group picked. After a submit that's NU's
+  // reply page, once its thank-you line is cleared (else the next confirmation
+  // can't be told from it); anything amiss and the form is opened afresh.
+  const readyForm = async () => {
+    if (formOpen && await ctx.call('hasForm', 'arrelease')) {
+      await ctx.call('clearNotice');
+      const ids = await ctx.call('pickedIds');
+      if (ids.series === info.id && ids.group === group.id && !SUCCESS_RE.test(await ctx.call('pageText'))) return;
+    }
+    formOpen = false;
+    await openAddRelease(ctx, goto);
+    await pick(ctx, 'series', info.title, info.id);
+    await pick(ctx, 'group', group.name, group.id);
+    formOpen = true;
+  };
+  const post = async ({ release, link, date }, label, n) => {
+    await readyForm();
+    const missing = await ctx.call('fill', { arrelease: release.trim(), arlink: link, ardate: date || '' });
+    if (missing.length) throw new Error(`add-release form has no ${missing.join(', ')} field`);
+    const form = await ctx.call('formValues');
+    const filled = await snap(ctx, 'release', 'filled', n);
+    const detail = { series: { title: info.title, ...(slug ? { slug } : {}), id: info.id }, release: release.trim(), link, date };
+    if (dryRun) return { status: 'dry_run', ...detail, form, screenshot: filled };
+    // Space submits like page loads.
+    if (submits++) await pause(ctx);
+    const { message, reply, screenshot } = await submitAndRecord(ctx, 'release', target, label, detail, n);
+    return { status: 'submitted', ...detail, message, reply, screenshots: [filled, screenshot] };
+  };
+
+  const out = [];
+  const failed = (r, err) => ({ status: 'failed', release: r.release.trim(), link: r.link, error: err.message.split('\n')[0] });
+  for (const [i, r] of releases.entries()) {
+    if (out.some((x) => x.status === 'failed')) {
+      out.push({ status: 'not_attempted', release: r.release.trim(), link: r.link });
+      continue;
+    }
+    const label = normLabel(r.release);
+    let res;
+    try { res = checkPrior('release', target, label, force); } catch (err) { res = failed(r, err); }
+    if (!res && !info) await loadSeries(); // fails the job: nothing new has been submitted
+    if (!res) {
+      try {
+        res = settled(label) || await post(r, label, numbered ? i + 1 : undefined);
+      } catch (err) {
+        ctx.checkCancelled();
+        res = failed(r, err);
+      }
+    }
+    out.push(res);
+    ctx.progress({ releases: releases.length, done: i + 1, submitted: out.filter((x) => x.status === 'submitted').length });
   }
+  return { info, results: out };
+}
 
-  const group = await ourGroup(ctx, goto);
-  await openAddRelease(ctx, goto);
-  await pick(ctx, 'series', info.title, info.id);
-  await pick(ctx, 'group', group.name, group.id);
-  const missing = await ctx.call('fill', { arrelease: release.trim(), arlink: link, ardate: date || '' });
-  if (missing.length) throw new Error(`add-release form has no ${missing.join(', ')} field`);
-  const form = await ctx.call('formValues');
-  const filled = await snap(ctx, 'release', 'filled');
-  const detail = { series: { title: info.title, ...(slug ? { slug } : {}), id: info.id }, release: release.trim(), link, date };
-  if (dryRun) return { status: 'dry_run', ...detail, form, screenshot: filled };
+// Post one release (see postReleases). Returns status: exists |
+// already_submitted | dry_run | submitted.
+export async function addRelease(ctx, { series, seriesId, seriesTitle, release, link, date, dryRun, force }) {
+  const { results: [res] } = await postReleases(ctx, { series, seriesId, seriesTitle, releases: [{ release, link, date }], dryRun, force });
+  if (res.status === 'failed') throw new Error(res.error);
+  return res;
+}
 
-  const { message, reply, screenshot } = await submitAndRecord(ctx, 'release', target, label, detail);
-  return { status: 'submitted', ...detail, message, reply, screenshots: [filled, screenshot] };
+// Post several releases of one series in one job (see postReleases), in the
+// order given: oldest first. Result: {status: done | stopped, series,
+// submitted, releases: [one entry per release]}. stopped means a release
+// failed (its entry has the error) and the ones after it weren't attempted.
+export async function addReleases(ctx, { releases, ...rest }) {
+  const { info, results } = await postReleases(ctx, { ...rest, releases, numbered: true });
+  // Entries name the release as sent; an existing one's table row is `live`.
+  const entries = results.map((res, i) => {
+    const { series: _, release: live, ...more } = res;
+    return { release: releases[i].release.trim(), link: releases[i].link, ...more, ...(res.status === 'exists' ? { live } : {}) };
+  });
+  const slug = rest.series ? seriesSlug(rest.series) : undefined;
+  return {
+    status: entries.some((r) => r.status === 'failed') ? 'stopped' : 'done',
+    series: info ? { title: info.title, slug, id: info.id } : { title: rest.seriesTitle, slug, id: rest.seriesId },
+    submitted: entries.filter((r) => r.status === 'submitted').length,
+    releases: entries,
+  };
 }
 
 // Submit a new series. T9 checks it isn't on NU first (POST /nu/search).
@@ -375,8 +456,7 @@ export async function addSeries(ctx, p) {
   if (prior) return prior;
 
   const goto = pacedGoto(ctx);
-  await ensureSession(ctx, goto);
-  await goto(`${BASE}/add-series/`);
+  await gotoLoggedIn(ctx, goto, `${BASE}/add-series/`);
   if (!(await ctx.call('hasForm', 'titlenew'))) throw new Error(`no add-series form (${(await ctx.call('pageText')).slice(0, 200)})`);
 
   const problems = [];
@@ -438,12 +518,11 @@ export async function addSeries(ctx, p) {
 // ids. They change rarely; callers should cache them.
 export async function vocabulary(ctx) {
   const goto = pacedGoto(ctx);
-  await ensureSession(ctx, goto);
-  await goto(`${BASE}/add-series/`);
+  await gotoLoggedIn(ctx, goto, `${BASE}/add-series/`);
   const v = await ctx.call('vocabulary');
   if (!v.genres.length || !v.tags?.length) throw new Error('no genre or tag lists on /add-series/ (has the page layout changed?)');
   ctx.progress({ genres: v.genres.length, tags: v.tags.length });
   return { fetchedAt: new Date().toISOString(), ...v };
 }
 
-export const ops = { login, syncGroup, search, releaseSearch, addRelease, addSeries, vocabulary, seriesInfo, associatedNames };
+export const ops = { login, syncGroup, search, releaseSearch, addRelease, addReleases, addSeries, vocabulary, seriesInfo, associatedNames };

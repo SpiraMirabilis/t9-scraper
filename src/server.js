@@ -11,7 +11,7 @@ import { adapters, adapterFor, adapterForPage, adapterByName } from './sites/ind
 import { allSiteSettings } from './settings.js';
 import { buildResult, capturePath, pruneCaptures } from './runner.js';
 import { startWorker, kick, cancel, currentJobId } from './queue.js';
-import { SHOT_DIR } from './nu.js';
+import { SHOT_DIR, normLabel } from './nu.js';
 import { engines, engineNames, defaultEngine, activeEngine, closeAll, warmup } from './engines/index.js';
 
 const app = Fastify({
@@ -313,6 +313,44 @@ app.post('/nu/releases', {
 }, async (req, reply) => {
   if (req.body.series && req.body.seriesId) return reply.code(400).send({ error: 'give series or seriesId, not both' });
   return enqueue(reply, 'nu', nuAdapter, { op: 'addRelease', ...req.body });
+});
+
+app.post('/nu/releases/batch', {
+  schema: nuJob('Post several releases (chapters) of one series to NovelUpdates',
+    'As POST /nu/releases, for up to 50 releases of one series in one job, in the order given (oldest first). ' +
+    'The series page and the form are loaded once, and each release after the first takes one submit, spaced ' +
+    'like page loads. Stops at the first release that fails. Result: {status: done | stopped, series, submitted, ' +
+    'releases: [{release, link, status, ...}]}, one entry per release, status as for POST /nu/releases or ' +
+    'failed (with error) and not_attempted for the ones after it. Every release gets its filled and submitted ' +
+    'screenshots. A login, series or block-page problem before anything is posted fails the job instead.',
+    {
+      type: 'object', required: ['releases'], additionalProperties: false,
+      oneOf: [{ required: ['series'] }, { required: ['seriesId', 'seriesTitle'] }],
+      properties: {
+        series: { type: 'string', minLength: 1, description: 'NU series URL or slug (from POST /nu/search)' },
+        seriesId: { type: 'string', pattern: '^\\d+$', description: 'NU series id (from POST /nu/release-search), instead of series' },
+        seriesTitle: { type: 'string', minLength: 2, description: 'With seriesId: the title to type in the Series box' },
+        releases: {
+          type: 'array', minItems: 1, maxItems: 50,
+          items: {
+            type: 'object', required: ['release', 'link'], additionalProperties: false,
+            properties: {
+              release: { type: 'string', minLength: 1, maxLength: 60, description: 'NU release label, e.g. c12 or v2c10' },
+              link: { type: 'string', pattern: '^https?://', description: 'Our chapter\'s URL' },
+              date: { type: 'string', pattern: '^\\d{2}/\\d{2}/\\d{4}$', description: 'MM/DD/YYYY, only for a release made before today' },
+            },
+          },
+        },
+        ...writeProps,
+      },
+    }),
+}, async (req, reply) => {
+  const { series, seriesId, releases } = req.body;
+  if (series && seriesId) return reply.code(400).send({ error: 'give series or seriesId, not both' });
+  const labels = releases.map((r) => normLabel(r.release));
+  const dup = labels.find((l, i) => labels.indexOf(l) !== i);
+  if (dup) return reply.code(400).send({ error: `release ${dup} is in the batch twice` });
+  return enqueue(reply, 'nu', nuAdapter, { op: 'addReleases', ...req.body });
 });
 
 const seriesRef = { type: 'string', minLength: 1, description: 'NU series URL or slug' };

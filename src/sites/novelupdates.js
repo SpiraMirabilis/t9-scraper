@@ -98,6 +98,28 @@ export function makeSite(common) {
       el.click();
       return document.getElementById(kind === 'group' ? 'group100' : 'title100').value;
     },
+    // The ids the Series and Group boxes hold now. NU's reply to a submit
+    // keeps them, so a batch can post the next release on the same form.
+    pickedIds() {
+      return {
+        series: document.getElementById('title100')?.value || null,
+        group: document.getElementById('group100')?.value || null,
+      };
+    },
+    // Drop the last submit's thank-you line (outside the form), so the next
+    // reply's line is the only one.
+    clearNotice() {
+      const main = document.querySelector('.w-blog-content, .l-content');
+      if (!main) return 0;
+      const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+      let n = 0;
+      for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+        if (t.parentElement.closest('form') || !/Thank you!/i.test(t.nodeValue)) continue;
+        t.nodeValue = t.nodeValue.replace(/Thank you![^.]*\./gi, '');
+        n++;
+      }
+      return n;
+    },
 
     // Plain fields by name: {name: value}. Selects take the option's value.
     fill(fields) {

@@ -278,6 +278,23 @@ test('nu: releases and series validate, queue, and dedupe', async () => {
   ]) assert.equal((await req('POST', '/nu/series', bad)).status, 400, JSON.stringify(bad));
 });
 
+test('nu: release batches validate, queue, and dedupe', async () => {
+  const releases = [{ release: 'c4', link: 'https://example.com/c4' }, { release: 'c5', link: 'https://example.com/c5', date: '10/01/2026' }];
+  const body = { series: 'the-law-abiding-necromancer', releases };
+  const a = await req('POST', '/nu/releases/batch', body);
+  assert.equal(a.status, 202);
+  assert.deepEqual(a.body.params, { op: 'addReleases', ...body, dryRun: false, force: false });
+  assert.equal((await req('POST', '/nu/releases/batch', body)).body.id, a.body.id);
+  const byId = { seriesId: '232967', seriesTitle: 'The Law-Abiding Necromancer', releases };
+  assert.equal((await req('POST', '/nu/releases/batch', byId)).status, 202);
+  for (const bad of [
+    { releases }, { ...body, releases: [] }, { ...body, seriesId: '232967', seriesTitle: 'x y' },
+    { ...body, releases: [{ release: 'c4' }] }, { ...body, releases: [{ ...releases[0], extra: 1 }] },
+    { ...body, releases: [...releases, { release: ' C4', link: 'https://example.com/again' }] },
+    { ...body, releases: Array.from({ length: 51 }, (_, i) => ({ release: `c${i}`, link: 'https://example.com/' })) },
+  ]) assert.equal((await req('POST', '/nu/releases/batch', bad)).status, 400, JSON.stringify(bad));
+});
+
 test('nu: submission log and screenshots', async () => {
   assert.deepEqual((await req('GET', '/nu/submissions')).body, []);
   assert.equal((await req('GET', '/nu/screenshots/nu-abc-series-filled.png')).status, 404);
