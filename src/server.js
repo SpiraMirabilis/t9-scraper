@@ -7,9 +7,9 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { config } from './config.js';
 import { jobs, challenges } from './db.js';
-import { adapters, adapterFor } from './sites/index.js';
+import { adapters, adapterFor, adapterForPage } from './sites/index.js';
 import { allSiteSettings } from './settings.js';
-import { buildResult } from './runner.js';
+import { buildResult, capturePath, pruneCaptures } from './runner.js';
 import { startWorker, kick, cancel, currentJobId } from './queue.js';
 import { engines, engineNames, defaultEngine, activeEngine, closeAll, warmup } from './engines/index.js';
 
@@ -25,7 +25,8 @@ await app.register(swagger, {
       title: 'Chapter scraper',
       version: '0.2.0',
       description: 'Queue scrapes of raw web-novel chapters; poll the job; fetch the result. ' +
-        `Supported sites: ${adapters.map((a) => a.name).join(', ')}.`,
+        `Supported sites: ${adapters.map((a) => a.name).join(', ')}. ` +
+        'POST /page fetches any other URL as rendered HTML or a screenshot.',
     },
     components: { securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } } },
     security: [{ bearer: [] }],
@@ -68,7 +69,7 @@ const jobView = {
   additionalProperties: true,
   properties: {
     id: { type: 'string' },
-    kind: { type: 'string', enum: ['chapters', 'toc'] },
+    kind: { type: 'string', enum: ['chapters', 'toc', 'page'] },
     priority: { type: 'string', enum: ['normal', 'low'] },
     site: { type: 'string' },
     status: { type: 'string', enum: ['queued', 'running', 'blocked', 'done', 'failed', 'cancelled'] },
@@ -78,7 +79,7 @@ const jobView = {
       description: 'pages, chapters, chars, lastUrl, lastTitle, lastChapter, delayMs, engine; blockedAt/blockedUrl while blocked',
     },
     vncUrl: { type: 'string', description: 'Only while blocked: where a human can solve the challenge' },
-    stopReason: { type: 'string', description: 'end | toChapter | maxChapters | stall | toc | cancelled' },
+    stopReason: { type: 'string', description: 'end | toChapter | maxChapters | stall | toc | page | cancelled' },
     error: { type: 'string' },
     deduped: { type: 'boolean', description: 'True when an identical active job was returned instead of a new one' },
     createdAt: { type: 'string' }, startedAt: { type: 'string' }, finishedAt: { type: 'string' },
@@ -131,6 +132,29 @@ const tocSchema = {
   response: { 200: jobView, 202: jobView, 400: error },
 };
 
+const pageSchema = {
+  tags: ['page'],
+  summary: 'Queue a single-page fetch (any site)',
+  description: 'Loads url in the scraper\'s browser, waits out any challenge like other jobs, then captures the ' +
+    'rendered HTML (default) or a PNG screenshot. Captures happen after the load event (15 s cap), plus waitMs ' +
+    'for pages that render late. Fetch the capture from GET /jobs/{id}/result, which returns the raw ' +
+    'text/html or image/png, and fetch it soon: captures are deleted CAPTURE_TTL_HOURS (default 24) after ' +
+    'they are taken. Patchright engine only.',
+  body: {
+    type: 'object', required: ['url'], additionalProperties: false,
+    properties: {
+      url: { type: 'string', pattern: '^https?://', description: 'Any http(s) page' },
+      format: { type: 'string', enum: ['html', 'screenshot'], default: 'html' },
+      waitMs: { type: 'integer', minimum: 0, maximum: 120_000, default: 0, description: 'Extra wait after load, before capturing' },
+      fullPage: { type: 'boolean', default: true, description: 'screenshot: the whole scrollable page, not just the window' },
+      engine: { type: 'string', enum: ['patchright'], description: 'Only patchright can capture arbitrary pages' },
+      priority: { type: 'string', enum: ['normal', 'low'], default: 'normal' },
+      ...notifyProps,
+    },
+  },
+  response: { 200: jobView, 202: jobView, 400: error },
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -154,10 +178,13 @@ const view = (j, extra = {}) => ({
 
 // Two requests are the same work when the site, kind, URL, range and engine
 // match. Pacing (delayMs) doesn't change what's scraped, so it's left out.
+// For a page, the capture options are what's being asked for.
 const dedupeKey = (kind, site, p) => {
   const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return u; } };
-  const k = { url: canon(p.url), fromChapter: p.fromChapter, fromUrl: p.fromUrl && canon(p.fromUrl),
-    toChapter: p.toChapter, maxChapters: p.maxChapters, engine: p.engine || defaultEngine.name };
+  const k = kind === 'page'
+    ? { url: canon(p.url), format: p.format, waitMs: p.waitMs, fullPage: p.fullPage, engine: p.engine }
+    : { url: canon(p.url), fromChapter: p.fromChapter, fromUrl: p.fromUrl && canon(p.fromUrl),
+      toChapter: p.toChapter, maxChapters: p.maxChapters, engine: p.engine || defaultEngine.name };
   return `${kind}|${site}|${JSON.stringify(k, Object.keys(k).sort())}`;
 };
 
@@ -199,6 +226,13 @@ app.post('/toc', { schema: tocSchema }, async (req, reply) => {
   return enqueue(reply, 'toc', adapter, req.body);
 });
 
+app.post('/page', { schema: pageSchema }, async (req, reply) => {
+  const adapter = adapterForPage(req.body.url);
+  if (!adapter) return reply.code(400).send({ error: 'url must be http(s)' });
+  // Pinned rather than defaulted: the extension engine can't run page jobs.
+  return enqueue(reply, 'page', adapter, { ...req.body, engine: 'patchright' });
+});
+
 app.get('/jobs', {
   schema: {
     tags: ['jobs'], summary: 'List jobs, newest first',
@@ -224,7 +258,8 @@ app.get('/jobs/:id/result', {
   schema: {
     tags: ['jobs'], summary: 'Job result',
     description: 'chapters jobs: the export JSON (same shape as the TamperMonkey exports), partial for failed or ' +
-      'cancelled jobs and for jobs still running. toc jobs: the chapter list, once done.',
+      'cancelled jobs and for jobs still running. toc jobs: the chapter list, once done. page jobs: the raw ' +
+      'capture (text/html or image/png), once done; X-Final-Url holds the URL after redirects.',
     params: idParams,
     querystring: {
       type: 'object',
@@ -240,6 +275,13 @@ app.get('/jobs/:id/result', {
   const started = j.startedAt || j.progress?.pages; // a yielded backfill is queued but has pages
   if (j.status === 'queued' && !started) return reply.code(409).send({ error: 'job has not started' });
   if (j.kind === 'toc' && !j.result) return reply.code(409).send({ error: `toc not available (status: ${j.status})` });
+  if (j.kind === 'page') {
+    if (!j.result) return reply.code(409).send({ error: `page not captured (status: ${j.status})` });
+    let body;
+    try { body = fs.readFileSync(capturePath(j.result.file)); }
+    catch { return reply.code(410).send({ error: `capture expired (kept ${config.captureTtlHours}h)` }); }
+    return reply.type(j.result.contentType).header('x-final-url', j.result.url).send(body);
+  }
   const result = buildResult(j);
   const { offset, limit } = req.query;
   if (j.kind === 'chapters' && (offset !== undefined || limit !== undefined)) {
@@ -326,6 +368,10 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 await app.listen({ host: config.host, port: config.port });
+// Expire page captures: once now, then hourly.
+const sweep = () => { const n = pruneCaptures(); if (n) app.log.info(`deleted ${n} expired page capture(s)`); };
+sweep();
+setInterval(sweep, 3600_000).unref();
 // WORKER=0: API only, nothing runs queued jobs (maintenance, tests).
 if (process.env.WORKER !== '0') startWorker();
 if (config.launchOnStart) warmup().catch((err) => app.log.warn(`browser launch at startup failed: ${err.message}`));

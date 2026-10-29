@@ -52,9 +52,9 @@ db.exec(`
 // databases keep their jobs.
 const jobCols = new Set(db.prepare(`PRAGMA table_info(jobs)`).all().map((c) => c.name));
 for (const [col, ddl] of [
-  ['kind', `ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'chapters'`], // chapters | toc
+  ['kind', `ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'chapters'`], // chapters | toc | page
   ['dedupe_key', `ALTER TABLE jobs ADD COLUMN dedupe_key TEXT`],                // site + canonical params
-  ['result', `ALTER TABLE jobs ADD COLUMN result TEXT`],                        // JSON, for kinds without pages (toc)
+  ['result', `ALTER TABLE jobs ADD COLUMN result TEXT`],                        // JSON, for kinds without pages (toc, page)
   ['priority', `ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0`], // 0 normal, -1 low (backfills)
   ['notify_secret', `ALTER TABLE jobs ADD COLUMN notify_secret TEXT`],          // kept out of params so it's never echoed
 ]) if (!jobCols.has(col)) db.exec(ddl);

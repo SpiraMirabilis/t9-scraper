@@ -1,6 +1,8 @@
 // The generic crawl loop -- the userscripts' run loop, driven from outside the
 // page. Per page: settle (wait out any challenge) -> delay -> capture -> stop
 // checks -> store -> advance. Site specifics live in the adapters.
+import fs from 'node:fs';
+import path from 'node:path';
 import { config } from './config.js';
 import { jobs, pages, challenges } from './db.js';
 import { activate } from './engines/index.js';
@@ -192,9 +194,66 @@ async function runTocJob(job, control) {
   return 'toc';
 }
 
-// Returns the stop reason: end | toChapter | maxChapters | stall | toc.
+// Page captures are files, not DB rows: a full-page PNG runs to megabytes, and
+// every job listing parses each row's result.
+const CAPTURE_DIR = path.join(config.dataDir, 'captures');
+export const capturePath = (file) => path.join(CAPTURE_DIR, file);
+
+// Delete captures older than CAPTURE_TTL_HOURS. Goes by file age, so files
+// whose job row is gone are swept too. Returns how many were removed.
+export function pruneCaptures(now = Date.now()) {
+  if (!config.captureTtlHours) return 0;
+  const cutoff = now - config.captureTtlHours * 3600_000;
+  let n = 0;
+  let names = [];
+  try { names = fs.readdirSync(CAPTURE_DIR); } catch { return 0; }
+  for (const f of names) {
+    try {
+      if (fs.statSync(capturePath(f)).mtimeMs < cutoff) { fs.unlinkSync(capturePath(f)); n++; }
+    } catch { /* raced with a capture or another sweep */ }
+  }
+  return n;
+}
+
+// Page job: load any URL (waiting out challenges like any job), optionally
+// wait longer for scripts to render, then save the HTML or a screenshot.
+async function runPageJob(job, control) {
+  const engine = await activate(job.params.engine);
+  const page = await engine.open();
+  await page.bringToFront();
+  const ctx = makeContext(job, page, control, engine);
+  page.setNavTimeout(ctx.settings.navTimeoutMs);
+  ctx.progress({ engine: engine.name });
+  const p = job.params;
+
+  await ctx.goto(p.url);
+  await page.waitForFullLoad(15_000); // images and late scripts; a stuck one doesn't block
+  if (p.waitMs) {
+    await ctx.sleep(p.waitMs);
+    await ctx.waitOutChallenge(); // a delayed interstitial
+  }
+  ctx.checkCancelled();
+
+  const shot = p.format === 'screenshot';
+  const body = shot ? await page.screenshot({ fullPage: p.fullPage }) : Buffer.from(await page.content());
+  const file = `${job.id}.${shot ? 'png' : 'html'}`;
+  fs.mkdirSync(CAPTURE_DIR, { recursive: true });
+  fs.writeFileSync(capturePath(file), body);
+  const info = {
+    url: await page.url(),
+    title: await page.title().catch(() => ''),
+    contentType: shot ? 'image/png' : 'text/html; charset=utf-8',
+    bytes: body.length,
+  };
+  jobs.setResult(job.id, { ...info, file, capturedAt: new Date().toISOString() });
+  ctx.progress({ finalUrl: info.url, title: info.title, bytes: info.bytes });
+  return 'page';
+}
+
+// Returns the stop reason: end | toChapter | maxChapters | stall | toc | page.
 export async function runJob(job, control) {
   if (job.kind === 'toc') return runTocJob(job, control);
+  if (job.kind === 'page') return runPageJob(job, control);
   const engine = await activate(job.params.engine);
   const page = await engine.open();
   await page.bringToFront();

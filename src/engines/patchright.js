@@ -85,6 +85,12 @@ export async function open() {
     },
     bringToFront: () => p.bringToFront().catch(() => {}),
     setNavTimeout: (ms) => p.setDefaultNavigationTimeout(ms),
+    // Page jobs (src/runner.js runPageJob). The extension engine has none of
+    // these: it holds host permissions for the adapters' sites only.
+    waitForFullLoad: (ms) => p.waitForLoadState('load', { timeout: ms }).catch(() => {}),
+    title: () => p.title(),
+    content: () => p.content(),
+    screenshot: ({ fullPage }) => p.screenshot({ type: 'png', fullPage }),
   };
 }
 

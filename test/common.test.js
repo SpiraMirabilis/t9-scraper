@@ -152,3 +152,16 @@ test('notify signature: HMAC-SHA256 over "t.body"', () => {
   assert.equal(sign('key', '{"a":1}', 1700000000),
     't=1700000000,v1=a438e398bfafc57e4396bb7fc2304422f0f768e965d073ca313cb52e22e6ad03');
 });
+
+test('pruneCaptures deletes only captures past the TTL', async () => {
+  const fs = await import('node:fs');
+  const { pruneCaptures, capturePath } = await import('../src/runner.js');
+  fs.mkdirSync(capturePath(''), { recursive: true });
+  fs.writeFileSync(capturePath('old.png'), 'x');
+  fs.writeFileSync(capturePath('new.html'), 'x');
+  const old = new Date(Date.now() - 25 * 3600_000);
+  fs.utimesSync(capturePath('old.png'), old, old);
+  assert.equal(pruneCaptures(), 1); // default TTL 24h
+  assert.ok(!fs.existsSync(capturePath('old.png')));
+  assert.ok(fs.existsSync(capturePath('new.html')));
+});

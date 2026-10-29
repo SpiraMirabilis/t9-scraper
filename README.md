@@ -75,9 +75,10 @@ All other routes except `/health` need `Authorization: Bearer $API_TOKEN`.
 | Route | |
 |---|---|
 | `POST /toc` | `{url, engine?}`: read a book's chapter list without fetching chapters |
+| `POST /page` | `{url, format?, waitMs?, fullPage?, priority?}`: fetch any page as rendered HTML or a PNG screenshot |
 | `POST /jobs` | `{url, fromChapter?, fromUrl?, toChapter?, maxChapters?, delayMs?, priority?, engine?}`: scrape chapters |
 | `GET /jobs/:id` | `status`: queued, running, blocked, done, failed or cancelled. Also `progress`, `stopReason`, `error`, and `vncUrl` while blocked |
-| `GET /jobs/:id/result?offset=&limit=` | Chapters: export JSON, readable while the job runs and partial for failed or cancelled jobs; `offset`/`limit` return a slice of chapters. TOC: the chapter list |
+| `GET /jobs/:id/result?offset=&limit=` | Chapters: export JSON, readable while the job runs and partial for failed or cancelled jobs; `offset`/`limit` return a slice of chapters. TOC: the chapter list. Page: the raw capture |
 | `POST /jobs/:id/retry` | Requeue a failed or cancelled job; it resumes after its last captured page |
 | `DELETE /jobs/:id` | Cancel |
 | `GET /jobs?status=&limit=` | List, newest first |
@@ -86,7 +87,7 @@ All other routes except `/health` need `Authorization: Bearer $API_TOKEN`.
 | `GET /stats/challenges?since=` | Challenge outcomes per engine and site |
 | `GET /health` | Engine and display status |
 
-Both `POST` routes return `202` with a new job. If an identical job (same
+All three `POST` routes return `202` with a new job. If an identical job (same
 site, URL, range and engine) is already queued, running or blocked, they
 return `200` with that job and `deduped: true` instead of starting a second copy.
 
@@ -98,6 +99,26 @@ How the chapter job fields work:
 - **`delayMs`** can only raise the site's pacing, never drop it below the floor.
 - **`priority: "low"`** is for backfills (a whole new book). Low jobs run only when nothing normal is queued, and step aside between pages when a normal job arrives, resuming later from their last captured page. Daily updates never wait behind a backfill.
 - **`engine`** picks the browser engine for this job; the default is `ENGINE`. The worker closes one engine's browser before starting the other.
+
+### Page fetches
+
+`POST /page` loads any http(s) URL, not just supported sites, in the same
+browser. It waits out challenges the same way, paging you over noVNC if
+needed. It captures once the page's load event fires (15 s cap), then waits
+`waitMs` longer if set, for pages that render late:
+
+- **`format`**: `html` (default; the live DOM, serialized after
+  scripts ran) or `screenshot` (PNG).
+- **`fullPage`**: screenshots only; `true` (default) captures the whole
+  scrollable page, `false` just the 1600×1000 window.
+- The result route returns the bytes as `text/html; charset=utf-8` or
+  `image/png`, with `X-Final-Url` set to the URL after redirects. The job's
+  `progress` also has `finalUrl`, `title` and `bytes`.
+- Captures are files under `data/captures/`, deleted `CAPTURE_TTL_HOURS`
+  (default 24, `0` = keep) after they're taken; after that the result route
+  returns `410`. Fetch soon after the job finishes.
+- Page jobs always run on Patchright: the extension only has permission for
+  the supported sites.
 
 A TOC result has `chapterCount`, `latest`, and `chapters[]` of
 `{position, number, title, url}`. TOCs can include unnumbered extras (author's

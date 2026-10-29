@@ -46,6 +46,9 @@ export const config = {
   defaultDelayMs: int(env.DEFAULT_DELAY_MS, 2000),
   navTimeoutMs: int(env.NAV_TIMEOUT_MS, 60_000),
   challengeTimeoutMs: int(env.CHALLENGE_TIMEOUT_MS, 30 * 60_000),
+  // Page-job captures (HTML / PNG files under <dataDir>/captures) are deleted
+  // this long after capture; 0 keeps them forever. The job row stays.
+  captureTtlHours: int(env.CAPTURE_TTL_HOURS, 24),
 
   // Where a human goes to solve a challenge. Shown in job status and notices.
   vncUrl: env.VNC_URL || 'http://localhost:6080/vnc.html?autoconnect=1&resize=scale',

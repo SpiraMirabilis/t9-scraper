@@ -46,7 +46,7 @@ test('auth: token required except health and docs', async () => {
 
 test('openapi spec lists the routes', async () => {
   const spec = (await req('GET', '/docs/json')).body;
-  for (const p of ['/jobs', '/toc', '/jobs/{id}', '/jobs/{id}/result', '/jobs/{id}/retry', '/supported_sites']) assert.ok(spec.paths[p], p);
+  for (const p of ['/jobs', '/toc', '/jobs/{id}', '/jobs/{id}/result', '/jobs/{id}/retry', '/supported_sites', '/page']) assert.ok(spec.paths[p], p);
 });
 
 test('supported_sites: sorted domain list from the adapters', async () => {
@@ -165,4 +165,52 @@ test('result paging slices chapters but keeps the total', async () => {
   assert.equal(slice.returned, 2);
   assert.deepEqual(slice.chapters.map((c) => c.number), [4, 5]);
   assert.equal(slice.chapters[0].index, 3);
+});
+
+test('page: any http(s) URL, defaults filled, engine pinned, dedupe on capture options', async () => {
+  const a = await req('POST', '/page', { url: 'https://example.com/some/page' });
+  assert.equal(a.status, 202);
+  assert.equal(a.body.kind, 'page');
+  assert.equal(a.body.site, 'generic');
+  assert.deepEqual(a.body.params, { url: 'https://example.com/some/page', format: 'html', waitMs: 0, fullPage: true, engine: 'patchright' });
+  assert.equal((await req('POST', '/page', { url: 'https://example.com/some/page#frag' })).body.id, a.body.id);
+  const shot = await req('POST', '/page', { url: 'https://example.com/some/page', format: 'screenshot' });
+  assert.equal(shot.status, 202);
+  assert.notEqual(shot.body.id, a.body.id);
+  const waited = await req('POST', '/page', { url: 'https://example.com/some/page', waitMs: 3000 });
+  assert.notEqual(waited.body.id, a.body.id);
+  // A known site's page keeps that site's name (and settings), even off a book URL.
+  assert.equal((await req('POST', '/page', { url: 'https://twkan.com/' })).body.site, 'twkan');
+  assert.equal((await req('GET', `/jobs/${a.body.id}/result`)).status, 409);
+});
+
+test('page: validation', async () => {
+  for (const body of [
+    { url: 'ftp://example.com/' },
+    { url: 'file:///etc/passwd' },
+    { url: 'https://example.com/', format: 'pdf' },
+    { url: 'https://example.com/', engine: 'extension' },
+    { url: 'https://example.com/', waitMs: 999_999 },
+    { url: 'https://example.com/', fromChapter: 1 },
+  ]) assert.equal((await req('POST', '/page', body)).status, 400, JSON.stringify(body));
+});
+
+test('page: result is the raw capture with its content type', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(path.join(dataDir, 'scraper.db'));
+  const ins = db.prepare(`INSERT INTO jobs (id, kind, site, params, status, result, created_at, started_at, finished_at)
+                          VALUES (?, 'page', 'generic', '{}', 'done', ?, 't', 't', 't')`);
+  fs.mkdirSync(path.join(dataDir, 'captures'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'captures', 'page-html.html'), '<html><body>你好</body></html>');
+  ins.run('page-html', JSON.stringify({ file: 'page-html.html', contentType: 'text/html; charset=utf-8', url: 'https://example.com/final?q=%E4%BD%A0' }));
+  ins.run('page-gone', JSON.stringify({ file: 'page-gone.png', contentType: 'image/png', url: 'https://example.com/' }));
+  db.close();
+  const res = await fetch(`${BASE}/jobs/page-html/result`, { headers: { authorization: `Bearer ${TOKEN}` } });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'text/html; charset=utf-8');
+  assert.equal(res.headers.get('x-final-url'), 'https://example.com/final?q=%E4%BD%A0');
+  assert.equal(await res.text(), '<html><body>你好</body></html>');
+  const gone = await req('GET', '/jobs/page-gone/result');
+  assert.equal(gone.status, 410);
+  assert.match(gone.body.error, /expired/);
 });
