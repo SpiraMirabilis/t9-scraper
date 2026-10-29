@@ -63,5 +63,7 @@ export const config = {
     login: env.NOVELUPDATES_LOGIN || '',
     password: env.NOVELUPDATES_PASSWORD || '',
     groupUrl: env.NOVELUPDATES_OUR_GROUP || '',
+    // New-series form screenshots outlive CAPTURE_TTL_HOURS; 0 = keep.
+    seriesShotTtlHours: int(env.NU_SERIES_SHOT_TTL_HOURS, 7 * 24),
   },
 };

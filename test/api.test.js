@@ -255,6 +255,20 @@ test('nu: releases and series validate, queue, and dedupe', async () => {
     { release: 'c2', link: rel.link }, { ...rel, link: 'ftp://x' }, { ...rel, date: '2026-10-01' }, { ...rel, extra: 1 },
   ]) assert.equal((await req('POST', '/nu/releases', bad)).status, 400, JSON.stringify(bad));
 
+  // A pending series: by id + title instead of slug, never both.
+  const byId = { seriesId: '232967', seriesTitle: 'The Law-Abiding Necromancer', release: 'c3', link: rel.link };
+  const c = await req('POST', '/nu/releases', byId);
+  assert.equal(c.status, 202);
+  assert.equal(c.body.params.seriesId, '232967');
+  for (const bad of [
+    { ...byId, series: rel.series }, { seriesId: '232967', release: 'c3', link: rel.link }, { ...byId, seriesId: 'abc' },
+    { release: 'c3', link: rel.link },
+  ]) assert.equal((await req('POST', '/nu/releases', bad)).status, 400, JSON.stringify(bad));
+  const rs = await req('POST', '/nu/release-search', { title: 'The Law-Abiding Necromancer' });
+  assert.equal(rs.status, 202);
+  assert.deepEqual(rs.body.params, { op: 'releaseSearch', title: 'The Law-Abiding Necromancer' });
+  assert.equal((await req('POST', '/nu/release-search', { title: 'x' })).status, 400);
+
   const ser = { title: 'A Test Series', associatedNames: ['測試'], genres: ['Fantasy'], dryRun: true };
   const s = await req('POST', '/nu/series', ser);
   assert.equal(s.status, 202);
@@ -266,11 +280,11 @@ test('nu: releases and series validate, queue, and dedupe', async () => {
 
 test('nu: submission log and screenshots', async () => {
   assert.deepEqual((await req('GET', '/nu/submissions')).body, []);
-  assert.equal((await req('GET', '/nu/screenshots/nu-abc-filled.png')).status, 404);
+  assert.equal((await req('GET', '/nu/screenshots/nu-abc-series-filled.png')).status, 404);
   assert.equal((await req('GET', '/nu/screenshots/..%2Fscraper.db')).status, 400);
   fs.mkdirSync(path.join(dataDir, 'captures'), { recursive: true });
-  fs.writeFileSync(path.join(dataDir, 'captures', 'nu-abc-filled.png'), 'png');
-  const res = await fetch(`${BASE}/nu/screenshots/nu-abc-filled.png`, { headers: { authorization: `Bearer ${TOKEN}` } });
+  fs.writeFileSync(path.join(dataDir, 'captures', 'nu-abc-release-filled.png'), 'png');
+  const res = await fetch(`${BASE}/nu/screenshots/nu-abc-release-filled.png`, { headers: { authorization: `Bearer ${TOKEN}` } });
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('content-type'), 'image/png');
 });

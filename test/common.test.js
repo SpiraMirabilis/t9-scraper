@@ -165,3 +165,17 @@ test('pruneCaptures deletes only captures past the TTL', async () => {
   assert.ok(!fs.existsSync(capturePath('old.png')));
   assert.ok(fs.existsSync(capturePath('new.html')));
 });
+
+test('pruneCaptures keeps new-series screenshots for 7 days', async () => {
+  const fs = await import('node:fs');
+  const { pruneCaptures, capturePath } = await import('../src/runner.js');
+  fs.mkdirSync(capturePath(''), { recursive: true });
+  const age = (f, h) => { const t = new Date(Date.now() - h * 3600_000); fs.writeFileSync(capturePath(f), 'x'); fs.utimesSync(capturePath(f), t, t); };
+  age('nu-0a1b-release-filled.png', 25);
+  age('nu-0a1b-series-filled.png', 25);
+  age('nu-0a1b-series-submitted.png', 7 * 24 + 1);
+  assert.equal(pruneCaptures(), 2);
+  assert.ok(fs.existsSync(capturePath('nu-0a1b-series-filled.png')));
+  assert.ok(!fs.existsSync(capturePath('nu-0a1b-release-filled.png')));
+  assert.ok(!fs.existsSync(capturePath('nu-0a1b-series-submitted.png')));
+});

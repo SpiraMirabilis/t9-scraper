@@ -293,19 +293,40 @@ app.post('/nu/releases', {
     'Logs in if needed, skips the post if our group already has this release on the series page or the ' +
     'submission log says it was sent (NU moderation hides new releases for hours), else fills /add-release/ ' +
     'and submits. Result status: submitted | exists | already_submitted | dry_run, with screenshots ' +
-    '(GET /nu/screenshots/{file}). A series has to be on NU first; for one we have never posted to, NU lists ' +
+    '(GET /nu/screenshots/{file}). Name the series by `series` (URL or slug, for an approved series) or by ' +
+    '`seriesId` + `seriesTitle` (from POST /nu/release-search, for one still awaiting approval: it has no page, ' +
+    'so only the submission log guards against duplicates). For a series we have never posted to, NU lists ' +
     'it on our group page only after approving our first release.',
     {
-      type: 'object', required: ['series', 'release', 'link'], additionalProperties: false,
+      type: 'object', required: ['release', 'link'], additionalProperties: false,
+      oneOf: [{ required: ['series'] }, { required: ['seriesId', 'seriesTitle'] }],
       properties: {
         series: { type: 'string', minLength: 1, description: 'NU series URL or slug (from POST /nu/search)' },
+        seriesId: { type: 'string', pattern: '^\\d+$', description: 'NU series id (from POST /nu/release-search), instead of series' },
+        seriesTitle: { type: 'string', minLength: 2, description: 'With seriesId: the title to type in the Series box' },
         release: { type: 'string', minLength: 1, maxLength: 60, description: 'NU release label, e.g. c12 or v2c10' },
         link: { type: 'string', pattern: '^https?://', description: 'Our chapter\'s URL' },
         date: { type: 'string', pattern: '^\\d{2}/\\d{2}/\\d{4}$', description: 'MM/DD/YYYY, only for a release made before today' },
         ...writeProps,
       },
     }),
-}, async (req, reply) => enqueue(reply, 'nu', nuAdapter, { op: 'addRelease', ...req.body }));
+}, async (req, reply) => {
+  if (req.body.series && req.body.seriesId) return reply.code(400).send({ error: 'give series or seriesId, not both' });
+  return enqueue(reply, 'nu', nuAdapter, { op: 'addRelease', ...req.body });
+});
+
+app.post('/nu/release-search', {
+  schema: nuJob('Find a series in the add-release form (approved or still pending)',
+    'Types title into /add-release/\'s Series box, which searches NU\'s whole database, including series ' +
+    'awaiting approval (they have no public page, so POST /nu/search can\'t see them). Nothing is submitted. ' +
+    'Result: {title, match: {id, title} | null, ambiguous, hits: [{id, title}]}; match is set only when ' +
+    'exactly one hit\'s title equals title (ignoring case, spaces and punctuation). Post to it with ' +
+    'POST /nu/releases {seriesId, seriesTitle}.',
+    {
+      type: 'object', required: ['title'], additionalProperties: false,
+      properties: { title: { type: 'string', minLength: 2, maxLength: 300, description: 'The series\' NU (English) title' } },
+    }),
+}, async (req, reply) => enqueue(reply, 'nu', nuAdapter, { op: 'releaseSearch', title: req.body.title }));
 
 const strings = { type: 'array', items: { type: 'string', minLength: 1 } };
 app.post('/nu/series', {
@@ -347,12 +368,17 @@ app.get('/nu/submissions', {
 app.get('/nu/screenshots/:file', {
   schema: {
     tags: ['novelupdates'], summary: 'A form screenshot from a nu job (PNG)',
-    params: { type: 'object', properties: { file: { type: 'string', pattern: '^nu-[0-9a-f-]+-[a-z]+\\.png$' } }, required: ['file'] },
+    description: 'Kept CAPTURE_TTL_HOURS (default 24); new-series ones NU_SERIES_SHOT_TTL_HOURS (default 168).',
+    params: { type: 'object', properties: { file: { type: 'string', pattern: '^nu-[0-9a-f-]+-[a-z-]+\\.png$' } }, required: ['file'] },
   },
 }, async (req, reply) => {
   let body;
   try { body = fs.readFileSync(`${SHOT_DIR}/${req.params.file}`); }
-  catch { return reply.code(404).send({ error: `not found (screenshots are kept ${config.captureTtlHours}h)` }); }
+  catch {
+    return reply.code(404).send({
+      error: `not found (screenshots are kept ${config.captureTtlHours}h, new-series ones ${config.nu.seriesShotTtlHours}h)`,
+    });
+  }
   return reply.type('image/png').send(body);
 });
 

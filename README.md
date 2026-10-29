@@ -158,12 +158,13 @@ The login lives in the Patchright profile; jobs log in again when it lapses.
 | `POST /nu/search` | `{names}`: is the series on NU? `names` is the raw title in every form you have (Traditional *and* Simplified: NU's search doesn't convert). Result `{found, series, inOurGroup, candidates}`; `found` only when the series page's title or an associated name equals one of `names` |
 | `POST /nu/group/sync` | Re-read our group page and store its series list. A series appears there once NU approves our first release of it |
 | `GET /nu/group/series` | The stored list (no browser) |
-| `POST /nu/releases` | `{series, release, link, date?, dryRun?, force?}`: post a release (`release` is NU's label, e.g. `c12`, `v2c10`) |
+| `POST /nu/release-search` | `{title}`: search the add-release form's Series box, which also finds series still awaiting approval (no public page yet). Result `{match: {id, title} \| null, ambiguous, hits}` |
+| `POST /nu/releases` | `{series \| seriesId+seriesTitle, release, link, date?, dryRun?, force?}`: post a release (`release` is NU's label, e.g. `c12`, `v2c10`). Name a pending series by the id from `/nu/release-search` |
 | `POST /nu/series` | `{title, associatedNames, genres, ...}`: submit a new series (search first). Unknown genre/tag/type/language names fail before anything is sent |
 | `POST /nu/vocabulary` | The genre, tag, type and language names (with NU ids) that `POST /nu/series` accepts. Cache it |
 | `POST /nu/login` | Log in now (setup; other jobs log in by themselves) |
 | `GET /nu/submissions` | Everything submitted, newest first |
-| `GET /nu/screenshots/:file` | Screenshots of the filled-in and submitted forms (kept `CAPTURE_TTL_HOURS`) |
+| `GET /nu/screenshots/:file` | Screenshots of the filled-in and submitted forms (kept `CAPTURE_TTL_HOURS`; new-series ones `NU_SERIES_SHOT_TTL_HOURS`, default 7 days) |
 
 Never posting twice: `POST /nu/releases` returns `exists` if our group already
 has that release on the series page, and `already_submitted` if the local log

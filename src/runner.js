@@ -10,7 +10,7 @@ import { notify } from './notify.js';
 import { chapterKey, parseChapterNumber, groupChapters, numberGaps, CN_HEADER_RE } from './sites/common.js';
 import { adapterByName } from './sites/index.js';
 import { siteSettings, effectiveDelay } from './settings.js';
-import { ops as nuOps } from './nu.js';
+import { ops as nuOps, SERIES_SHOT_RE } from './nu.js';
 
 export class Cancelled extends Error {}
 // A low-priority job stepping aside for a more urgent one; it goes back in the
@@ -207,17 +207,20 @@ async function runTocJob(job, control) {
 const CAPTURE_DIR = path.join(config.dataDir, 'captures');
 export const capturePath = (file) => path.join(CAPTURE_DIR, file);
 
-// Delete captures older than CAPTURE_TTL_HOURS. Goes by file age, so files
-// whose job row is gone are swept too. Returns how many were removed.
+// Delete captures older than CAPTURE_TTL_HOURS (NovelUpdates new-series
+// screenshots: NU_SERIES_SHOT_TTL_HOURS). Goes by file age, so files whose
+// job row is gone are swept too. A TTL of 0 keeps those files. Returns how
+// many were removed.
 export function pruneCaptures(now = Date.now()) {
-  if (!config.captureTtlHours) return 0;
-  const cutoff = now - config.captureTtlHours * 3600_000;
+  const ttlHours = (f) => (SERIES_SHOT_RE.test(f) ? config.nu.seriesShotTtlHours : config.captureTtlHours);
   let n = 0;
   let names = [];
   try { names = fs.readdirSync(CAPTURE_DIR); } catch { return 0; }
   for (const f of names) {
+    const ttl = ttlHours(f);
+    if (!ttl) continue;
     try {
-      if (fs.statSync(capturePath(f)).mtimeMs < cutoff) { fs.unlinkSync(capturePath(f)); n++; }
+      if (fs.statSync(capturePath(f)).mtimeMs < now - ttl * 3600_000) { fs.unlinkSync(capturePath(f)); n++; }
     } catch { /* raced with a capture or another sweep */ }
   }
   return n;
