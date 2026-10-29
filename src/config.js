@@ -57,4 +57,11 @@ export const config = {
   notifyKind: env.NOTIFY_KIND || 'ntfy', // 'ntfy' (text + headers) | 'json'
   // json: HMAC key for X-Scraper-Signature; ntfy: access token (Bearer). Never API_TOKEN.
   notifySecret: env.NOTIFY_SECRET || '',
+
+  // NovelUpdates (src/nu.js): the account we post as and our group's page.
+  nu: {
+    login: env.NOVELUPDATES_LOGIN || '',
+    password: env.NOVELUPDATES_PASSWORD || '',
+    groupUrl: env.NOVELUPDATES_OUR_GROUP || '',
+  },
 };

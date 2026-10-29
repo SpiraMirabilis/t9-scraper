@@ -6,11 +6,12 @@ import Fastify from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { config } from './config.js';
-import { jobs, challenges } from './db.js';
-import { adapters, adapterFor, adapterForPage } from './sites/index.js';
+import { jobs, challenges, nuGroup, nuSubmissions } from './db.js';
+import { adapters, adapterFor, adapterForPage, adapterByName } from './sites/index.js';
 import { allSiteSettings } from './settings.js';
 import { buildResult, capturePath, pruneCaptures } from './runner.js';
 import { startWorker, kick, cancel, currentJobId } from './queue.js';
+import { SHOT_DIR } from './nu.js';
 import { engines, engineNames, defaultEngine, activeEngine, closeAll, warmup } from './engines/index.js';
 
 const app = Fastify({
@@ -26,7 +27,8 @@ await app.register(swagger, {
       version: '0.2.0',
       description: 'Queue scrapes of raw web-novel chapters; poll the job; fetch the result. ' +
         `Supported sites: ${adapters.map((a) => a.name).join(', ')}. ` +
-        'POST /page fetches any other URL as rendered HTML or a screenshot.',
+        'POST /page fetches any other URL as rendered HTML or a screenshot. ' +
+        '/nu/* drives NovelUpdates (search, our group\'s series list, posting releases and series).',
     },
     components: { securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } } },
     security: [{ bearer: [] }],
@@ -69,7 +71,7 @@ const jobView = {
   additionalProperties: true,
   properties: {
     id: { type: 'string' },
-    kind: { type: 'string', enum: ['chapters', 'toc', 'page'] },
+    kind: { type: 'string', enum: ['chapters', 'toc', 'page', 'nu'] },
     priority: { type: 'string', enum: ['normal', 'low'] },
     site: { type: 'string' },
     status: { type: 'string', enum: ['queued', 'running', 'blocked', 'done', 'failed', 'cancelled'] },
@@ -79,7 +81,7 @@ const jobView = {
       description: 'pages, chapters, chars, lastUrl, lastTitle, lastChapter, delayMs, engine; blockedAt/blockedUrl while blocked',
     },
     vncUrl: { type: 'string', description: 'Only while blocked: where a human can solve the challenge' },
-    stopReason: { type: 'string', description: 'end | toChapter | maxChapters | stall | toc | page | cancelled' },
+    stopReason: { type: 'string', description: 'end | toChapter | maxChapters | stall | toc | page | the nu op | cancelled' },
     error: { type: 'string' },
     deduped: { type: 'boolean', description: 'True when an identical active job was returned instead of a new one' },
     createdAt: { type: 'string' }, startedAt: { type: 'string' }, finishedAt: { type: 'string' },
@@ -178,9 +180,11 @@ const view = (j, extra = {}) => ({
 
 // Two requests are the same work when the site, kind, URL, range and engine
 // match. Pacing (delayMs) doesn't change what's scraped, so it's left out.
-// For a page, the capture options are what's being asked for.
+// For a page, the capture options are what's being asked for; for nu, the op
+// and its arguments.
 const dedupeKey = (kind, site, p) => {
   const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return u; } };
+  if (kind === 'nu') return `${kind}|${site}|${JSON.stringify(p, Object.keys(p).sort())}`;
   const k = kind === 'page'
     ? { url: canon(p.url), format: p.format, waitMs: p.waitMs, fullPage: p.fullPage, engine: p.engine }
     : { url: canon(p.url), fromChapter: p.fromChapter, fromUrl: p.fromUrl && canon(p.fromUrl),
@@ -233,6 +237,143 @@ app.post('/page', { schema: pageSchema }, async (req, reply) => {
   return enqueue(reply, 'page', adapter, { ...req.body, engine: 'patchright' });
 });
 
+// ---------------------------------------------------------------------------
+// NovelUpdates. Each POST queues a nu job (same polling as any job); the
+// result route returns the op's result.
+// ---------------------------------------------------------------------------
+const nuAdapter = adapterByName('novelupdates');
+const nuJob = (summary, description, body = { type: 'object', additionalProperties: false, properties: {} }) =>
+  ({ tags: ['novelupdates'], summary, description, body, response: { 200: jobView, 202: jobView } });
+
+app.post('/nu/search', {
+  schema: nuJob('Is this series on NovelUpdates?',
+    'Searches NU for the untranslated title and opens the hits to compare names. Result: {found, series: ' +
+    '{title, url, slug, id} | null, inOurGroup, candidates[]}. found is true only when the series page\'s title ' +
+    'or an associated name equals one of names (ignoring spaces and punctuation); otherwise candidates lists ' +
+    'what the search returned, for you to judge.',
+    {
+      type: 'object', required: ['names'], additionalProperties: false,
+      properties: {
+        names: {
+          type: 'array', minItems: 1, maxItems: 6, items: { type: 'string', minLength: 1, maxLength: 200 },
+          description: 'The untranslated title, in every form you have (e.g. Traditional and Simplified): ' +
+            'NU stores one or the other and its search does not convert',
+        },
+      },
+    }),
+}, async (req, reply) => enqueue(reply, 'nu', nuAdapter, { op: 'search', names: req.body.names }));
+
+app.post('/nu/group/sync', {
+  schema: nuJob('Refresh our group\'s series list from its NU page',
+    'Result: {group, syncedAt, added: [slug], series: [...]}. added lists series not seen before; a series ' +
+    'appears here once NU has approved our first release of it. GET /nu/group/series reads the stored list.'),
+}, async (req, reply) => enqueue(reply, 'nu', nuAdapter, { op: 'syncGroup' }));
+
+app.post('/nu/vocabulary', {
+  schema: nuJob('The genres, tags, types and languages NU accepts for a new series',
+    'Read from /add-series/ (logged in). Result: {fetchedAt, genres, tags, types, languages}, each a list of ' +
+    '{id, name}. POST /nu/series takes the names. They change rarely: cache them.'),
+}, async (req, reply) => enqueue(reply, 'nu', nuAdapter, { op: 'vocabulary' }));
+
+app.post('/nu/login', {
+  schema: nuJob('Log in to NovelUpdates (if the browser isn\'t already)',
+    'Other write ops log in by themselves; this is for setup and checks. Result: {loggedIn, didLogin}.'),
+}, async (req, reply) => enqueue(reply, 'nu', nuAdapter, { op: 'login' }));
+
+const writeProps = {
+  dryRun: { type: 'boolean', default: false, description: 'Fill the form and screenshot it, but don\'t submit' },
+  force: {
+    type: 'boolean', default: false,
+    description: 'Submit even though the log says this was (or may have been) sent before',
+  },
+};
+
+app.post('/nu/releases', {
+  schema: nuJob('Post a release (chapter) to NovelUpdates',
+    'Logs in if needed, skips the post if our group already has this release on the series page or the ' +
+    'submission log says it was sent (NU moderation hides new releases for hours), else fills /add-release/ ' +
+    'and submits. Result status: submitted | exists | already_submitted | dry_run, with screenshots ' +
+    '(GET /nu/screenshots/{file}). A series has to be on NU first; for one we have never posted to, NU lists ' +
+    'it on our group page only after approving our first release.',
+    {
+      type: 'object', required: ['series', 'release', 'link'], additionalProperties: false,
+      properties: {
+        series: { type: 'string', minLength: 1, description: 'NU series URL or slug (from POST /nu/search)' },
+        release: { type: 'string', minLength: 1, maxLength: 60, description: 'NU release label, e.g. c12 or v2c10' },
+        link: { type: 'string', pattern: '^https?://', description: 'Our chapter\'s URL' },
+        date: { type: 'string', pattern: '^\\d{2}/\\d{2}/\\d{4}$', description: 'MM/DD/YYYY, only for a release made before today' },
+        ...writeProps,
+      },
+    }),
+}, async (req, reply) => enqueue(reply, 'nu', nuAdapter, { op: 'addRelease', ...req.body }));
+
+const strings = { type: 'array', items: { type: 'string', minLength: 1 } };
+app.post('/nu/series', {
+  schema: nuJob('Submit a new series to NovelUpdates',
+    'Check POST /nu/search first: this doesn\'t. Fills /add-series/ and submits; fails before submitting if ' +
+    'NU doesn\'t know a genre, tag, type or language by that name. Result status: submitted | ' +
+    'already_submitted | dry_run. NU moderates new series, so it shows up later.',
+    {
+      type: 'object', required: ['title', 'associatedNames', 'genres'], additionalProperties: false,
+      properties: {
+        title: { type: 'string', minLength: 1, description: 'English series name' },
+        associatedNames: { ...strings, minItems: 1, description: 'The raw title first (NU requires it), then any others' },
+        description: { type: 'string' },
+        type: { type: 'string', description: 'Light Novel | Published Novel | Web Novel' },
+        genres: { ...strings, minItems: 1, description: 'NU genre names, e.g. Fantasy, Xianxia' },
+        tags: { ...strings, description: 'NU tag names' },
+        language: { type: 'string', description: 'e.g. Chinese' },
+        authors: strings,
+        artists: strings,
+        year: { type: 'integer', minimum: 1900, maximum: 2100 },
+        statusInCoo: { ...strings, description: 'Status in country of origin, e.g. "1200 Chapters (Ongoing)"' },
+        licensed: { type: 'boolean' },
+        completelyTranslated: { type: 'boolean' },
+        originalPublishers: strings,
+        englishPublishers: strings,
+        coverUrl: { type: 'string', pattern: '^https?://', description: 'Cover image (JPEG, PNG, GIF or WebP)' },
+        ...writeProps,
+      },
+    }),
+}, async (req, reply) => enqueue(reply, 'nu', nuAdapter, { op: 'addSeries', ...req.body }));
+
+app.get('/nu/submissions', {
+  schema: {
+    tags: ['novelupdates'], summary: 'What we have submitted to NU, newest first',
+    querystring: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 1000, default: 100 } } },
+  },
+}, async (req) => nuSubmissions.list(req.query.limit));
+
+app.get('/nu/screenshots/:file', {
+  schema: {
+    tags: ['novelupdates'], summary: 'A form screenshot from a nu job (PNG)',
+    params: { type: 'object', properties: { file: { type: 'string', pattern: '^nu-[0-9a-f-]+-[a-z]+\\.png$' } }, required: ['file'] },
+  },
+}, async (req, reply) => {
+  let body;
+  try { body = fs.readFileSync(`${SHOT_DIR}/${req.params.file}`); }
+  catch { return reply.code(404).send({ error: `not found (screenshots are kept ${config.captureTtlHours}h)` }); }
+  return reply.type('image/png').send(body);
+});
+
+app.get('/nu/group/series', {
+  schema: {
+    tags: ['novelupdates'], summary: 'Our group\'s series, as of the last sync (no browser)',
+    response: {
+      200: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            slug: { type: 'string' }, title: { type: 'string' }, url: { type: 'string' },
+            firstSeenAt: { type: 'string' }, lastSeenAt: { type: 'string' },
+          },
+        },
+      },
+    },
+  },
+}, async () => nuGroup.all());
+
 app.get('/jobs', {
   schema: {
     tags: ['jobs'], summary: 'List jobs, newest first',
@@ -275,6 +416,7 @@ app.get('/jobs/:id/result', {
   const started = j.startedAt || j.progress?.pages; // a yielded backfill is queued but has pages
   if (j.status === 'queued' && !started) return reply.code(409).send({ error: 'job has not started' });
   if (j.kind === 'toc' && !j.result) return reply.code(409).send({ error: `toc not available (status: ${j.status})` });
+  if (j.kind === 'nu' && !j.result) return reply.code(409).send({ error: `no result (status: ${j.status})` });
   if (j.kind === 'page') {
     if (!j.result) return reply.code(409).send({ error: `page not captured (status: ${j.status})` });
     let body;
@@ -374,5 +516,5 @@ sweep();
 setInterval(sweep, 3600_000).unref();
 // WORKER=0: API only, nothing runs queued jobs (maintenance, tests).
 if (process.env.WORKER !== '0') startWorker();
-if (config.launchOnStart) warmup().catch((err) => app.log.warn(`browser launch at startup failed: ${err.message}`));
 else app.log.warn('WORKER=0: jobs will queue but not run');
+if (config.launchOnStart) warmup().catch((err) => app.log.warn(`browser launch at startup failed: ${err.message}`));

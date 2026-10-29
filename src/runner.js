@@ -10,6 +10,7 @@ import { notify } from './notify.js';
 import { chapterKey, parseChapterNumber, groupChapters, numberGaps, CN_HEADER_RE } from './sites/common.js';
 import { adapterByName } from './sites/index.js';
 import { siteSettings, effectiveDelay } from './settings.js';
+import { ops as nuOps } from './nu.js';
 
 export class Cancelled extends Error {}
 // A low-priority job stepping aside for a more urgent one; it goes back in the
@@ -91,6 +92,13 @@ function makeContext(job, page, control, engine) {
         ctx.progress({ challenges: tally });
         console.log(`[job ${job.id}] challenge at ${url}: ${outcome} after ${Math.round((Date.now() - since) / 1000)}s`);
       };
+
+      // A firewall block won't clear and can't be solved: fail now rather
+      // than paging a human for CHALLENGE_TIMEOUT_MS.
+      if (await ctx.call('common.isHardBlocked').catch(() => false)) {
+        log('hardblock');
+        throw new Error(`Cloudflare blocked ${url} (a firewall rule, not a challenge)`);
+      }
 
       if (await ctx.waitClear(settings.challengeAutoWaitMs)) { log('auto'); return; }
 
@@ -250,10 +258,27 @@ async function runPageJob(job, control) {
   return 'page';
 }
 
-// Returns the stop reason: end | toChapter | maxChapters | stall | toc | page.
+// NovelUpdates job: one operation from src/nu.js, whose return value is the
+// job result. Always Patchright: it holds the NU login.
+async function runNuJob(job, control) {
+  const engine = await activate('patchright');
+  const page = await engine.open();
+  await page.bringToFront();
+  const ctx = makeContext(job, page, control, engine);
+  page.setNavTimeout(ctx.settings.navTimeoutMs);
+  ctx.progress({ engine: engine.name });
+  const op = nuOps[job.params.op];
+  if (!op) throw new Error(`unknown nu op ${job.params.op}`);
+  jobs.setResult(job.id, await op(ctx, job.params));
+  return job.params.op;
+}
+
+// Returns the stop reason: end | toChapter | maxChapters | stall | toc | page
+// | the nu op.
 export async function runJob(job, control) {
   if (job.kind === 'toc') return runTocJob(job, control);
   if (job.kind === 'page') return runPageJob(job, control);
+  if (job.kind === 'nu') return runNuJob(job, control);
   const engine = await activate(job.params.engine);
   const page = await engine.open();
   await page.bringToFront();
@@ -332,7 +357,7 @@ export async function runJob(job, control) {
 
 // The export, in the same shape the userscripts saved (plus job info).
 export function buildResult(job) {
-  if (job.kind === 'toc') return { ...(job.result || {}), job: { id: job.id, status: job.status } };
+  if (job.kind === 'toc' || job.kind === 'nu') return { ...(job.result || {}), job: { id: job.id, status: job.status } };
   const adapter = adapterByName(job.site);
   const stored = pages.all(job.id);
   const chapters = groupChapters(stored, { headerRe: adapter.headerRe || CN_HEADER_RE });

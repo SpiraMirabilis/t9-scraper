@@ -214,3 +214,63 @@ test('page: result is the raw capture with its content type', async () => {
   assert.equal(gone.status, 410);
   assert.match(gone.body.error, /expired/);
 });
+
+test('nu: search queues a nu job, dedupes, validates', async () => {
+  const body = { names: ['我，死灵法师，遵纪守法', '我，死靈法師，遵紀守法'] };
+  const a = await req('POST', '/nu/search', body);
+  assert.equal(a.status, 202);
+  assert.equal(a.body.kind, 'nu');
+  assert.equal(a.body.site, 'novelupdates');
+  assert.deepEqual(a.body.params, { op: 'search', ...body });
+  const b = await req('POST', '/nu/search', body);
+  assert.equal(b.status, 200);
+  assert.equal(b.body.id, a.body.id);
+  assert.equal((await req('POST', '/nu/search', { names: [body.names[0]] })).status, 202);
+  assert.equal((await req('GET', `/jobs/${a.body.id}/result`)).status, 409);
+  for (const bad of [{}, { names: [] }, { names: [''] }, { names: ['x'], op: 'login' }]) {
+    assert.equal((await req('POST', '/nu/search', bad)).status, 400, JSON.stringify(bad));
+  }
+});
+
+test('nu: group sync and login queue; the stored series list starts empty', async () => {
+  const s = await req('POST', '/nu/group/sync', {});
+  assert.equal(s.status, 202);
+  assert.deepEqual(s.body.params, { op: 'syncGroup' });
+  assert.equal((await req('POST', '/nu/group/sync', {})).body.id, s.body.id);
+  assert.deepEqual((await req('POST', '/nu/login', {})).body.params, { op: 'login' });
+  assert.deepEqual((await req('POST', '/nu/vocabulary', {})).body.params, { op: 'vocabulary' });
+  assert.deepEqual((await req('GET', '/nu/group/series')).body, []);
+  const spec = (await req('GET', '/docs/json')).body;
+  for (const p of ['/nu/search', '/nu/group/sync', '/nu/login', '/nu/group/series']) assert.ok(spec.paths[p], p);
+});
+
+test('nu: releases and series validate, queue, and dedupe', async () => {
+  const rel = { series: 'the-law-abiding-necromancer', release: 'c2', link: 'https://example.com/c2' };
+  const a = await req('POST', '/nu/releases', rel);
+  assert.equal(a.status, 202);
+  assert.deepEqual(a.body.params, { op: 'addRelease', ...rel, dryRun: false, force: false });
+  assert.equal((await req('POST', '/nu/releases', rel)).body.id, a.body.id);
+  assert.equal((await req('POST', '/nu/releases', { ...rel, dryRun: true })).status, 202);
+  for (const bad of [
+    { release: 'c2', link: rel.link }, { ...rel, link: 'ftp://x' }, { ...rel, date: '2026-10-01' }, { ...rel, extra: 1 },
+  ]) assert.equal((await req('POST', '/nu/releases', bad)).status, 400, JSON.stringify(bad));
+
+  const ser = { title: 'A Test Series', associatedNames: ['測試'], genres: ['Fantasy'], dryRun: true };
+  const s = await req('POST', '/nu/series', ser);
+  assert.equal(s.status, 202);
+  assert.equal(s.body.params.op, 'addSeries');
+  for (const bad of [
+    { ...ser, associatedNames: [] }, { ...ser, genres: [] }, { title: 'x', genres: ['Fantasy'] }, { ...ser, year: 'soon' },
+  ]) assert.equal((await req('POST', '/nu/series', bad)).status, 400, JSON.stringify(bad));
+});
+
+test('nu: submission log and screenshots', async () => {
+  assert.deepEqual((await req('GET', '/nu/submissions')).body, []);
+  assert.equal((await req('GET', '/nu/screenshots/nu-abc-filled.png')).status, 404);
+  assert.equal((await req('GET', '/nu/screenshots/..%2Fscraper.db')).status, 400);
+  fs.mkdirSync(path.join(dataDir, 'captures'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'captures', 'nu-abc-filled.png'), 'png');
+  const res = await fetch(`${BASE}/nu/screenshots/nu-abc-filled.png`, { headers: { authorization: `Bearer ${TOKEN}` } });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+});

@@ -41,6 +41,14 @@ Any other page, through the same browser and challenge handling:
     html = sc.page("https://example.com/", wait_ms=2000).decode()
     png = sc.page("https://example.com/", format="screenshot")
 
+NovelUpdates (the scraper's browser holds the login; you own the workflow):
+
+    hit = sc.nu_search(["我，死靈法師，遵紀守法", "我，死灵法师，遵纪守法"])  # trad + simp
+    if hit["found"]:
+        r = sc.nu_release(hit["series"]["url"], "c2", "https://our.site/necromancer/2")
+        # r["status"]: submitted | exists | already_submitted | dry_run
+    sc.nu_sync_group(); listed = {s["slug"] for s in sc.nu_group_series()}
+
 Command line:
     python scraper_client.py toc <url>
     python scraper_client.py chapters <url> [--from N] [--to N] [--max N] [-o out.json]
@@ -228,6 +236,52 @@ class ScraperClient:
         if job["status"] != "done":
             raise ScraperError(f"toc job {job['id']} {job['status']}: {job.get('error', '')}", job)
         return self.result(job["id"])
+
+    # --- NovelUpdates -------------------------------------------------------
+    def _nu(self, path: str, body: dict, poll: float, timeout: float | None) -> dict:
+        job = self._req("POST", path, {k: v for k, v in body.items() if v is not None})[1]
+        job = self.wait(job["id"], poll=poll, timeout=timeout)
+        if job["status"] != "done":
+            raise ScraperError(f"nu job {job['id']} {job['status']}: {job.get('error', '')}", job)
+        return self.result(job["id"])
+
+    def nu_search(self, names: list[str], poll: float = 3, timeout: float | None = None) -> dict:
+        """Is the series on NU? names: the raw title in every form (Traditional and
+        Simplified). {found, series: {title, url, slug, id} | None, inOurGroup, candidates}."""
+        return self._nu("/nu/search", {"names": names}, poll, timeout)
+
+    def nu_sync_group(self, poll: float = 3, timeout: float | None = None) -> dict:
+        """Re-read our group's NU page. {added: [slug], series: [...]}."""
+        return self._nu("/nu/group/sync", {}, poll, timeout)
+
+    def nu_group_series(self) -> list[dict]:
+        """Our group's series as of the last sync (no browser)."""
+        return self._req("GET", "/nu/group/series")[1]
+
+    def nu_release(self, series: str, release: str, link: str, date: str | None = None,
+                   dry_run: bool | None = None, force: bool | None = None,
+                   poll: float = 3, timeout: float | None = None) -> dict:
+        """Post a release: series is the NU URL or slug, release NU's label (c12, v2c10),
+        link our chapter URL, date MM/DD/YYYY only if released before today."""
+        return self._nu("/nu/releases", {"series": series, "release": release, "link": link, "date": date,
+                                         "dryRun": dry_run, "force": force}, poll, timeout)
+
+    def nu_add_series(self, title: str, associated_names: list[str], genres: list[str],
+                      poll: float = 3, timeout: float | None = None, **fields) -> dict:
+        """Submit a new series (search first). associated_names: raw title first. Other
+        fields as in POST /nu/series, camelCase (description, type, tags, language,
+        authors, year, statusInCoo, coverUrl, dryRun, ...)."""
+        return self._nu("/nu/series", {"title": title, "associatedNames": associated_names,
+                                       "genres": genres, **fields}, poll, timeout)
+
+    def nu_vocabulary(self, poll: float = 3, timeout: float | None = None) -> dict:
+        """NU's genre, tag, type and language lists for new series: {genres, tags, types,
+        languages}, each [{id, name}]. Cache it; it changes rarely."""
+        return self._nu("/nu/vocabulary", {}, poll, timeout)
+
+    def nu_submissions(self, limit: int = 100) -> list[dict]:
+        """What we've submitted to NU, newest first."""
+        return self._req("GET", f"/nu/submissions?limit={limit}")[1]
 
 
 def _main(argv: list[str]) -> int:

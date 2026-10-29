@@ -143,6 +143,41 @@ The module docstring has a fuller backfill loop. It also works as a CLI:
 `SCRAPER_TOKEN=... python scraper_client.py chapters <url> --from 120 -o out.json`
 (add `--backfill` for low priority).
 
+## NovelUpdates
+
+NovelUpdates (NU) has no API, so the scraper's browser posts our group's
+releases for the pipeline. The pipeline owns the workflow: which series are
+new, the wait after a first release, release order. These routes are the
+browser steps. Each `POST` queues a `nu` job; poll it and read
+`GET /jobs/:id/result` as with any job. Set `NOVELUPDATES_LOGIN`,
+`NOVELUPDATES_PASSWORD` and `NOVELUPDATES_OUR_GROUP` (the group page URL).
+The login lives in the Patchright profile; jobs log in again when it lapses.
+
+| Route | |
+|---|---|
+| `POST /nu/search` | `{names}`: is the series on NU? `names` is the raw title in every form you have (Traditional *and* Simplified: NU's search doesn't convert). Result `{found, series, inOurGroup, candidates}`; `found` only when the series page's title or an associated name equals one of `names` |
+| `POST /nu/group/sync` | Re-read our group page and store its series list. A series appears there once NU approves our first release of it |
+| `GET /nu/group/series` | The stored list (no browser) |
+| `POST /nu/releases` | `{series, release, link, date?, dryRun?, force?}`: post a release (`release` is NU's label, e.g. `c12`, `v2c10`) |
+| `POST /nu/series` | `{title, associatedNames, genres, ...}`: submit a new series (search first). Unknown genre/tag/type/language names fail before anything is sent |
+| `POST /nu/vocabulary` | The genre, tag, type and language names (with NU ids) that `POST /nu/series` accepts. Cache it |
+| `POST /nu/login` | Log in now (setup; other jobs log in by themselves) |
+| `GET /nu/submissions` | Everything submitted, newest first |
+| `GET /nu/screenshots/:file` | Screenshots of the filled-in and submitted forms (kept `CAPTURE_TTL_HOURS`) |
+
+Never posting twice: `POST /nu/releases` returns `exists` if our group already
+has that release on the series page, and `already_submitted` if the local log
+says it was sent. NU moderates releases, so for hours the log is the only
+record. If a job died between clicking submit and reading NU's reply, the
+next attempt fails and asks you to check NU, then resend with `force: true`.
+`dryRun: true` fills the form and takes a screenshot without submitting.
+
+For the T9 side (the workflow, result codes, open issues), see
+[docs/novelupdates-t9.md](docs/novelupdates-t9.md).
+
+Search with `/series-finder/?sf=1&sh=` only. NU's `/?s=` search trips a
+Cloudflare firewall rule.
+
 ## Per-site settings
 
 Defaults live in each adapter's `defaults` (twkan: `delayMs: 4000, minDelayMs: 4000`,
@@ -158,6 +193,10 @@ When a challenge shows up, the runner escalates in this order:
 1. Wait for it to clear by itself.
 2. Click the Turnstile checkbox, up to `challengeClicks` times.
 3. Mark the job `blocked`, send a notice to `NOTIFY_URL` with the noVNC link, and wait up to `CHALLENGE_TIMEOUT_MS` for you to solve it.
+
+A Cloudflare firewall block ("Sorry, you have been blocked") is different: a
+rule matched the request itself, so there's nothing to click or solve. The job
+fails at once (outcome `hardblock`) instead of paging you.
 
 A job can also name its own `notifyUrl` (plus `notifyKind`: `ntfy` or `json`) in
 `POST /jobs` or `POST /toc`. Its notice goes there as well as to `NOTIFY_URL`.

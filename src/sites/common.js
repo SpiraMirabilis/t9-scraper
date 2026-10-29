@@ -141,6 +141,14 @@ export function makeCommon() {
       const t = (document.title || '').toLowerCase();
       return /just a moment|attention required|checking your browser|verify you are human|请稍|訪問驗證|访问验证|人机验证|人機驗證|安全验证|安全驗證|验证浏览器|驗證瀏覽器/.test(t);
     },
+    // Cloudflare's firewall block page ("Sorry, you have been blocked"): a
+    // WAF rule matched the request, so there is no widget and nothing a human
+    // can solve. Shares the "Attention Required!" title with real challenges.
+    isHardBlocked() {
+      if (document.getElementById('cf-error-details')) return true;
+      const h1 = document.querySelector('h1');
+      return /you have been blocked/i.test((h1 && h1.textContent) || '');
+    },
     firstMatch(selectors) {
       for (const sel of selectors) {
         const el = document.querySelector(sel);

@@ -25,6 +25,26 @@ test('invoker dispatches common.* and site methods, rejects unknown', async () =
   delete globalThis.document;
 });
 
+test('hard block: Cloudflare firewall page, not a solvable challenge', async () => {
+  const invoke = new Function(`return (${invokerSource(adapterByName('generic'))});`)();
+  const doc = (h1, details = false) => ({
+    title: 'Attention Required! | Cloudflare', getElementById: (id) => (details && id === 'cf-error-details' ? {} : null),
+    querySelector: (sel) => (sel === 'h1' ? { textContent: h1 } : null), querySelectorAll: () => [],
+  });
+  globalThis.document = doc('Sorry, you have been blocked');
+  assert.equal(await invoke({ name: 'common.isChallenged' }), true);
+  assert.equal(await invoke({ name: 'common.isHardBlocked' }), true);
+  globalThis.document = doc('', true);
+  assert.equal(await invoke({ name: 'common.isHardBlocked' }), true);
+  globalThis.document = doc('Verify you are human');
+  assert.equal(await invoke({ name: 'common.isHardBlocked' }), false);
+  delete globalThis.document;
+});
+
+test('novelupdates bundle is valid, self-contained JS', () => {
+  assert.doesNotThrow(() => new Function(`return (${invokerSource(adapterByName('novelupdates'))});`));
+});
+
 test('worlds: only twkan ensureVariant is main-world', () => {
   const twkan = adapterByName('twkan');
   assert.equal(worldFor(twkan, 'capture'), 'isolated');

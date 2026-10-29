@@ -91,6 +91,11 @@ export async function open() {
     title: () => p.title(),
     content: () => p.content(),
     screenshot: ({ fullPage }) => p.screenshot({ type: 'png', fullPage }),
+    // NovelUpdates forms (src/nu.js): the cover image upload, and the form
+    // posting back to its own URL (so waitForUrlChange never fires).
+    setInputFiles: (selector, files) => p.setInputFiles(selector, files),
+    waitForNavigation: (ms) =>
+      p.waitForEvent('framenavigated', { predicate: (f) => f === p.mainFrame(), timeout: ms }).then(() => true, () => false),
   };
 }
 
