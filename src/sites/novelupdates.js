@@ -44,12 +44,17 @@ export function makeSite(common) {
     },
     loginError() { return textOf(document.querySelector('#login_error, .tml-error, .tml-errors')); },
 
-    // Group page: the "Series (N)" row of the info table links every series.
+    // Group page: the "Series (N)" row of the info table lists every series,
+    // as links while the group is small and as a <select id="grouplst">
+    // (option values are the series URLs) once it grows.
     groupSeries() {
       for (const tr of document.querySelectorAll('table.groupinfo tr')) {
         const cells = tr.querySelectorAll('td');
         if (cells.length < 2 || !/^Series\b/.test(textOf(cells[0]))) continue;
-        return [...cells[1].querySelectorAll('a[href*="/series/"]')].map(seriesLink);
+        const links = [...cells[1].querySelectorAll('a[href*="/series/"]')].map(seriesLink);
+        const options = [...cells[1].querySelectorAll('option[value*="/series/"]')]
+          .map((o) => ({ title: textOf(o), url: new URL(o.value, location.href).href }));
+        return [...links, ...options];
       }
       return null; // not a group page (layout changed?)
     },
