@@ -8,15 +8,12 @@
 //
 // Chapter headings ("第12章 标题", 番外, 楔子...) are ordinary <p>s inside
 // the text, and one page can hold the end of one chapter and the start of the
-// next. capture() splits each page at its headings and returns one record per
-// piece; a piece before the first heading continues the chapter carried over
-// from the previous page (meta.chapterTitle). On the first page, the text
-// before the first heading is the book's blurb: it goes to meta.intro, not a
-// chapter. The last page has no 下一页 link.
+// next. capture() splits each page at its headings (common.js pageRecords).
+// The last page has no 下一页 link.
 //
 // The TOC lists pages, not chapters, so fromChapter is a page number (第N页).
 
-import { CN_HEADER_RE } from './common.js';
+import { pageRecords } from './common.js';
 
 // Top-level sections that aren't book categories.
 const NOT_BOOK_RE = /^(zuozhe|tuijian|tags_\w+|top|so|e|skin|danmei)$/i;
@@ -47,30 +44,6 @@ export const parseBookTitle = (s) => {
   const t = (s || '').trim().replace(/\s*[（(]\d+[）)]\s*$/, '').replace(/\s*【[^】]*】\s*$/, '');
   const i = t.lastIndexOf('_');
   return i > 0 ? { bookName: t.slice(0, i), author: t.slice(i + 1) } : { bookName: t, author: '' };
-};
-
-// A heading line: short, no sentence-ending punctuation, and shaped like
-// 第N章 / 番外 / 楔子 / 尾声...
-const SPECIAL_HEADER_RE = /^(?:番外|楔子|序章|引子|尾声|后记|後記)(?:[\s0-9零〇一二三四五六七八九十百两：:、.·-].{0,30})?$/;
-export const isHeading = (line) =>
-  line.length <= 40 && !/[。！？!?…，,；;：:”"」』]$/.test(line)
-  && (CN_HEADER_RE.test(line) || SPECIAL_HEADER_RE.test(line));
-
-// Lines -> [{ title, lines }]. The first piece's title is null when the page
-// opens mid-chapter.
-export const splitPage = (lines) => {
-  const pieces = [];
-  let cur = null;
-  for (const line of lines) {
-    if (isHeading(line)) {
-      cur = { title: line, lines: [] };
-      pieces.push(cur);
-    } else {
-      if (!cur) { cur = { title: null, lines: [] }; pieces.push(cur); }
-      cur.lines.push(line);
-    }
-  }
-  return pieces;
 };
 
 // In-page half (serialized into the bundle; must be self-contained).
@@ -152,30 +125,13 @@ export async function resolveStart(ctx, { url, fromChapter, fromUrl }) {
 
 export const isEndUrl = () => false;
 
-// One record per chapter piece on the page (see the top of the file). Returns
-// [] for a page that only fed the intro.
+// One record per chapter piece on the page (common.js pageRecords).
 export async function capture(ctx) {
   const r = await ctx.call('capture');
   if (!r.lines) return null;
-  const patch = {};
-  if (!ctx.meta.bookName) Object.assign(patch, parseBookTitle(r.pageTitle));
+  const patch = ctx.meta.bookName ? {} : parseBookTitle(r.pageTitle);
   const page = readerPage(await ctx.url())?.page;
-  const recs = [];
-  for (const piece of splitPage(r.lines)) {
-    const text = piece.lines.join('\n');
-    let title = piece.title ?? ctx.meta.chapterTitle;
-    if (title == null) {
-      // Text before any heading: the blurb on the first page; on a job that
-      // started mid-book, the tail of a chapter that began before the range.
-      if (page === 2) { patch.intro = text; patch.fromStart = true; continue; }
-      if (!ctx.meta.fromStart) continue;
-      title = ''; // a book with no headings at all
-    }
-    if (piece.title) patch.chapterTitle = piece.title;
-    recs.push({ title, text });
-  }
-  if (Object.keys(patch).length) ctx.setMeta(patch);
-  return recs;
+  return pageRecords(ctx, r.lines, { firstPage: page === 2, patch });
 }
 
 export const isEndAfterCapture = () => false;

@@ -121,6 +121,58 @@ export const numberGaps = (chapters) => {
   return gaps;
 };
 
+// Sites that cut a whole book into fixed-size pages that ignore chapter
+// breaks (52shuku, jpxs123), with the chapter headings as ordinary lines in
+// the text. A heading line is short and shaped like 第N章 / 番外 / 楔子 /
+// 尾声... Titles can end in ！ or ？ (第二章 新人生，啓動！), so only a 第N章 line
+// ending in 。，；： is taken for prose; the looser 番外/楔子 shapes must not
+// end in any sentence punctuation.
+const SPECIAL_HEADER_RE = /^(?:番外|楔子|序章|引子|尾声|尾聲|后记|後記)(?:[\s0-9零〇一二三四五六七八九十百两兩：:、.·-].{0,30})?$/;
+export const isHeading = (line) => line.length <= 40 && (
+  (CN_HEADER_RE.test(line) && !/[。，,；;：:]$/.test(line))
+  || (SPECIAL_HEADER_RE.test(line) && !/[。！？!?…，,；;：:”"」』]$/.test(line)));
+
+// Lines -> [{ title, lines }]. The first piece's title is null when the page
+// opens mid-chapter.
+export const splitPage = (lines) => {
+  const pieces = [];
+  let cur = null;
+  for (const line of lines) {
+    if (isHeading(line)) {
+      cur = { title: line, lines: [] };
+      pieces.push(cur);
+    } else {
+      if (!cur) { cur = { title: null, lines: [] }; pieces.push(cur); }
+      cur.lines.push(line);
+    }
+  }
+  return pieces;
+};
+
+// One page of such a book -> one record per chapter piece, for capture() to
+// return. A piece before the page's first heading continues the chapter
+// carried over from the previous page (meta.chapterTitle). On the book's first
+// page that text is the blurb instead: it goes to meta.intro, not a chapter.
+// On a job that started mid-book, it is the tail of a chapter that began
+// before the range, and is dropped. Returns [] for a page that only fed the
+// intro.
+export const pageRecords = (ctx, lines, { firstPage, patch = {} }) => {
+  const recs = [];
+  for (const piece of splitPage(lines)) {
+    const text = piece.lines.join('\n');
+    let title = piece.title ?? ctx.meta.chapterTitle;
+    if (title == null) {
+      if (firstPage) { patch.intro = text; patch.fromStart = true; continue; }
+      if (!ctx.meta.fromStart) continue;
+      title = ''; // a book with no headings at all
+    }
+    if (piece.title) patch.chapterTitle = piece.title;
+    recs.push({ title, text });
+  }
+  if (Object.keys(patch).length) ctx.setMeta(patch);
+  return recs;
+};
+
 // ---------------------------------------------------------------------------
 // In-page side
 //

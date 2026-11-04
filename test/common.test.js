@@ -106,6 +106,10 @@ test('site routing', () => {
   assert.equal(adapterFor('https://www.52shuku.net/jiakong/index_2.html'), null);
   assert.equal(adapterFor('https://www.52shuku.net/zuozhe/iaTK.html'), null);
   assert.equal(adapterFor('https://www.52shuku.net/about.html'), null);
+  assert.equal(adapterFor('https://jpxs123.com/cyjk/12599.html').name, 'jpxs123');
+  assert.equal(adapterFor('https://www.jpxs123.com/cyjk/12599/1.html').bookId(new URL('https://jpxs123.com/cyjk/12599/1.html')), 'cyjk/12599');
+  assert.equal(adapterFor('https://jpxs123.com/author/10501/qiyuefeng.html'), null);
+  assert.equal(adapterFor('https://jpxs123.com/cyjk/'), null);
   assert.equal(adapterFor('https://evil-twkan.com/book/1.html'), null);
   assert.equal(adapterFor('https://twkan.com/'), null);
   assert.equal(adapterFor('not a url'), null);
@@ -186,13 +190,16 @@ test('pruneCaptures keeps new-series screenshots for 7 days', async () => {
 });
 
 test('52shuku: book title, headings and page splitting', async () => {
-  const { parseBookTitle, isHeading, splitPage } = await import('../src/sites/shuku52.js');
+  const { parseBookTitle } = await import('../src/sites/shuku52.js');
+  const { isHeading, splitPage } = await import('../src/sites/common.js');
   assert.deepEqual(parseBookTitle('神仙弃地_予春焱【完结+番外】(2)'), { bookName: '神仙弃地', author: '予春焱' });
   assert.deepEqual(parseBookTitle('BOSS作死指南_决绝【完结+番外】'), { bookName: 'BOSS作死指南', author: '决绝' });
   assert.ok(isHeading('第1章 废仙还世'));
   assert.ok(isHeading('番外一 重逢'));
   assert.ok(isHeading('楔子'));
   assert.ok(!isHeading('第一章写完了。'));
+  assert.ok(isHeading('第二章 新人生，啓動！'));
+  assert.ok(!isHeading('番外篇真好看！'));
   assert.ok(!isHeading('番外的故事就到这里了。'));
   assert.ok(!isHeading('作者有话要说：'));
   assert.deepEqual(splitPage(['a', '第2章 二', 'b', 'c', '第3章 三', 'd']), [
@@ -201,4 +208,12 @@ test('52shuku: book title, headings and page splitting', async () => {
     { title: '第3章 三', lines: ['d'] },
   ]);
   assert.deepEqual(splitPage(['第1章 一', 'x']), [{ title: '第1章 一', lines: ['x'] }]);
+});
+
+test('jpxs123: book name from either page\'s h1', async () => {
+  const { parseBookName } = await import('../src/sites/jpxs123.js');
+  assert.equal(parseBookName('東京，從動畫監督開始(1-172)'), '東京，從動畫監督開始');
+  assert.equal(parseBookName('東京，從動畫監督開始 第1章'), '東京，從動畫監督開始');
+  const { splitPage } = await import('../src/sites/common.js');
+  assert.deepEqual(splitPage(['結尾。', '第八十二章 提議與第十集', '正文']).map((p) => p.title), [null, '第八十二章 提議與第十集']);
 });
