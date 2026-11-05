@@ -328,7 +328,13 @@ export async function runJob(job, control) {
       await ctx.waitOutChallenge();
       rec = await adapter.capture(ctx);
     }
-    if (!rec) return 'end'; // no body: walked off the end of the book
+    if (!rec) {
+      // No body: walked off the end of the book -- unless nothing was ever
+      // captured, which means the job started on something that isn't a
+      // chapter page.
+      if (!lastUrl) throw new Error(`no chapter text at ${url} (not a chapter page?)`);
+      return 'end';
+    }
 
     // A page that holds parts of several chapters (52shuku) comes back as an
     // array of records, stored in order under the page's URL.

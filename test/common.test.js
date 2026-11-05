@@ -245,3 +245,12 @@ test('paged books: latest chapter and the page a chapter starts on', async () =>
   assert.equal(meta.minChapter, null);
   assert.deepEqual(pageRecords(rctx, ['四续。', '第5章 五'], { firstPage: false }).map((r) => r.title), ['第4章 四', '第5章 五']);
 });
+
+test('paged books: TOC chapter urls carry the chapter back as fromUrl', async () => {
+  const { pagedChapterUrl, chapterFromUrl } = await import('../src/sites/common.js');
+  const u = pagedChapterUrl('https://jpxs123.com/dsxs/12403.html', 51);
+  assert.equal(u, 'https://jpxs123.com/dsxs/12403.html?chapter=51');
+  assert.equal(chapterFromUrl(u), 51);
+  assert.equal(chapterFromUrl('https://jpxs123.com/dsxs/12403.html'), null);
+  assert.equal(adapterFor(u).bookId(new URL(u)), 'dsxs/12403');
+});

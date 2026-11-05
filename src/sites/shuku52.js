@@ -15,7 +15,7 @@
 // chapter off the last page, and fromChapter (a chapter number, as elsewhere)
 // is found by searching the pages: see pagedBook in common.js.
 
-import { pageRecords, pagedToc, resolvePagedStart } from './common.js';
+import { pageRecords, pagedToc, resolvePagedStart, chapterFromUrl } from './common.js';
 
 // Top-level sections that aren't book categories.
 const NOT_BOOK_RE = /^(zuozhe|tuijian|tags_\w+|top|so|e|skin|danmei)$/i;
@@ -110,10 +110,12 @@ async function bookPage(ctx, url) {
 // Chapters 1..latest, read off the last page (common.js pagedToc).
 export const readToc = async (ctx, { url }) => pagedToc(ctx, await bookPage(ctx, url));
 
-// fromChapter = chapter number; its page is found by search (common.js).
+// fromChapter = chapter number; its page is found by search (common.js). A
+// TOC url (book page + ?chapter=N) as fromUrl or url means the same.
 export async function resolveStart(ctx, { url, fromChapter, fromUrl }) {
-  if (fromUrl) return fromUrl;
-  if (readerPage(url) && !fromChapter) return url;
+  if (fromUrl && readerPage(fromUrl)) return fromUrl;
+  if (!fromUrl && readerPage(url) && !fromChapter) return url;
+  fromChapter = chapterFromUrl(fromUrl) || fromChapter || chapterFromUrl(url);
   const { pages, bookName, author } = await bookPage(ctx, url);
   const patch = {};
   if (bookName && !ctx.meta.bookName) patch.bookName = bookName;

@@ -232,14 +232,28 @@ export const pagedBook = (ctx, pages) => {
   };
 };
 
+// A chapter has no page of its own, so its TOC url is the book page plus
+// ?chapter=N; clients pass TOC urls back as fromUrl. (A query, not a #hash:
+// the job dedupe drops hashes.)
+export const pagedChapterUrl = (bookUrl, n) => {
+  const u = new URL(bookUrl);
+  u.searchParams.set('chapter', String(n));
+  return u.href;
+};
+export const chapterFromUrl = (href) => {
+  try {
+    const n = parseInt(new URL(href).searchParams.get('chapter'), 10);
+    return n > 0 ? n : null;
+  } catch { return null; }
+};
+
 // readToc for such a book: chapters 1..latest (position = number, so a
-// position goes back as fromChapter like on other sites), each pointing at
-// the book page since a chapter has no page of its own. The real page list is
-// under `pages`. Numbers the book skips still get an entry.
+// position goes back as fromChapter like on other sites). The real page list
+// is under `pages`. Numbers the book skips still get an entry.
 export const pagedToc = async (ctx, { bookUrl, pages, ...meta }) => {
   const latest = await pagedBook(ctx, pages).latest();
   const chapters = [];
-  for (let n = 1; n <= latest; n++) chapters.push({ position: n, number: n, title: `第${n}章`, url: bookUrl });
+  for (let n = 1; n <= latest; n++) chapters.push({ position: n, number: n, title: `第${n}章`, url: pagedChapterUrl(bookUrl, n) });
   return { ...meta, chapters, pages: pages.map((p, i) => ({ position: i + 1, url: p.url })) };
 };
 
