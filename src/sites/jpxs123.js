@@ -4,17 +4,18 @@
 //
 // URL shapes:
 //   /<cat>/<id>.html      book page: blurb + the page list (.book_list li,
-//                         "第1节" -> <cat>/<id>/1.html, oldest first; the TOC
-//                         relabels them 第N页 so 节 isn't read as a chapter)
+//                         "第1节" -> <cat>/<id>/1.html, oldest first)
 //   /<cat>/<id>/<n>.html  reader page n; its h1 says "第n章" but means page
 //
 // Chapter headings ("第一百七十二章 影響") are ordinary <p>s inside the text,
 // so capture() splits each page at them (common.js pageRecords). On the last
 // page 下一章 links back to the page itself.
 //
-// The TOC lists pages, not chapters, so fromChapter is a page number.
+// The page list says nothing about chapters, so the TOC reads the latest
+// chapter off the last page, and fromChapter (a chapter number, as elsewhere)
+// is found by searching the pages: see pagedBook in common.js.
 
-import { pageRecords } from './common.js';
+import { pageRecords, pagedToc, resolvePagedStart } from './common.js';
 
 const PATH_RE = /^\/([a-z]+)\/(\d+)(?:\/(\d+))?\.html$/i;
 // Top-level sections that aren't book categories.
@@ -99,33 +100,30 @@ export function makeSite(common) {
 
 export const worlds = {};
 
-// The book's page list. Position = page number = fromChapter value.
-export async function readToc(ctx, { url }) {
+// The book page: name, author and the page list.
+async function bookPage(ctx, url) {
   const u = new URL(url);
-  await ctx.goto(`${u.origin}/${bookId(u)}.html`);
-  const entries = (await ctx.call('tocEntries')).filter((e) => readerPage(e.url));
-  if (!entries.length) throw new Error('no pages found on the book page');
+  const bookUrl = `${u.origin}/${bookId(u)}.html`;
+  await ctx.goto(bookUrl);
+  const pages = (await ctx.call('tocEntries')).filter((e) => readerPage(e.url));
+  if (!pages.length) throw new Error('no pages found on the book page');
   const { title, author } = await ctx.call('tocMeta');
-  return {
-    bookName: parseBookName(title),
-    ...(author ? { author } : {}),
-    chapters: entries.map((e, i) => ({ position: i + 1, title: `第${i + 1}页`, url: e.url })),
-  };
+  return { bookUrl, pages, bookName: parseBookName(title), ...(author ? { author } : {}) };
 }
 
-// fromChapter = page number, i.e. reader page /<N>.html.
+// Chapters 1..latest, read off the last page (common.js pagedToc).
+export const readToc = async (ctx, { url }) => pagedToc(ctx, await bookPage(ctx, url));
+
+// fromChapter = chapter number; its page is found by search (common.js).
 export async function resolveStart(ctx, { url, fromChapter, fromUrl }) {
   if (fromUrl) return fromUrl;
   if (readerPage(url) && !fromChapter) return url;
-  const n = fromChapter || 1;
-  const { bookName, author, chapters } = await readToc(ctx, { url });
+  const { pages, bookName, author } = await bookPage(ctx, url);
   const patch = {};
   if (bookName && !ctx.meta.bookName) patch.bookName = bookName;
   if (author && !ctx.meta.author) patch.author = author;
   if (Object.keys(patch).length) ctx.setMeta(patch);
-  const entry = chapters[n - 1];
-  if (!entry) throw new Error(`page ${n} not found on the book page (it has ${chapters.length})`);
-  return entry.url;
+  return resolvePagedStart(ctx, { pages, fromChapter });
 }
 
 export const isEndUrl = () => false;

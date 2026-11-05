@@ -97,13 +97,13 @@ return `200` with that job and `deduped: true` instead of starting a second copy
 
 How the chapter job fields work:
 - **`url`** can be a book page or a chapter page. The site is picked from the URL.
-- **`fromChapter`** is a TOC entry's `position`: the 1-based TOC position on twkan, wfxs, 69shuba, novel543, biquge, ixdzs and uukanshu, the page number (第N页) on 52shuku and jpxs123, and the URL chapter number on novellunar. If that position doesn't exist (sources have gaps), the job starts at the next one that does.
+- **`fromChapter`** is a TOC entry's `position`: the 1-based TOC position on twkan, wfxs, 69shuba, novel543, biquge, ixdzs and uukanshu, and the chapter number on 52shuku, jpxs123 and novellunar. If that position doesn't exist (sources have gaps), the job starts at the next one that does.
 - **Defaults:** start at chapter 1, or at `url` if it's a chapter page, and run to the end of the book.
 - **`toChapter`** is inclusive and compared against the chapter number parsed from the title.
 - **`delayMs`** can only raise the site's pacing, never drop it below the floor.
 - **`priority: "low"`** is for backfills (a whole new book). Low jobs run only when nothing normal is queued, and step aside between pages when a normal job arrives, resuming later from their last captured page. Daily updates never wait behind a backfill.
 - **`engine`** picks the browser engine for this job; the default is `ENGINE`. The worker closes one engine's browser before starting the other.
-- **52shuku** and **jpxs123** cut whole books into pages that ignore chapter breaks, so their TOC lists pages (第N页), not chapters, and the scraper finds the chapters by splitting the pages at their 第N章 / 番外 headings. The blurb before the first chapter is exported as `intro`. A job started mid-book skips the tail of the chapter it lands in.
+- **52shuku** and **jpxs123** cut whole books into pages that ignore chapter breaks, and the scraper finds the chapters by splitting the pages at their 第N章 / 番外 headings. Their TOC reads the latest chapter off the last page and lists chapters 1 to that number (each `url` is the book page; the page list is under `pages`). A `fromChapter` job searches the pages for that chapter, which costs a few page loads before it starts. The blurb before the first chapter is exported as `intro`.
 
 ### Page fetches
 

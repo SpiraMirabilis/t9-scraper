@@ -156,8 +156,11 @@ export const splitPage = (lines) => {
 // On a job that started mid-book, it is the tail of a chapter that began
 // before the range, and is dropped. Returns [] for a page that only fed the
 // intro.
+// A job started at fromChapter N (meta.minChapter, see resolvePagedStart)
+// also drops everything on its first page before 第N章.
 export const pageRecords = (ctx, lines, { firstPage, patch = {} }) => {
   const recs = [];
+  let skipping = ctx.meta.minChapter;
   for (const piece of splitPage(lines)) {
     const text = piece.lines.join('\n');
     let title = piece.title ?? ctx.meta.chapterTitle;
@@ -166,11 +169,88 @@ export const pageRecords = (ctx, lines, { firstPage, patch = {} }) => {
       if (!ctx.meta.fromStart) continue;
       title = ''; // a book with no headings at all
     }
+    if (skipping) {
+      const n = piece.title ? parseChapterNumber(piece.title) : null;
+      if (!(Number.isFinite(n) && n >= skipping)) continue;
+      skipping = null;
+      patch.minChapter = null;
+    }
     if (piece.title) patch.chapterTitle = piece.title;
     recs.push({ title, text });
   }
   if (Object.keys(patch).length) ctx.setMeta(patch);
   return recs;
+};
+
+// The chapter numbers of such a book are only in its page text, so its TOC
+// and fromChapter work by reading a few pages. `pages` is the book page's
+// page list ([{ url }], in order); the adapter's in-page capture() must
+// return { lines }. Pages are probed at the site's pace and cached.
+export const pagedBook = (ctx, pages) => {
+  const cache = new Map();
+  let loads = 0;
+  const headings = async (i) => {
+    if (!cache.has(i)) {
+      if (loads++) await ctx.sleep(ctx.settings.delayMs);
+      await ctx.goto(pages[i].url);
+      const { lines } = await ctx.call('capture');
+      cache.set(i, (lines || []).filter(isHeading).map(parseChapterNumber).filter(Number.isFinite));
+    }
+    return cache.get(i);
+  };
+  // The chapter in progress at the end of page i: its last numbered heading,
+  // else that of the nearest earlier page that has one (0 before chapter 1).
+  // Never decreases with i. `floor` is a known [index, value] below i.
+  const endChapter = async (i, floor = [-1, 0]) => {
+    for (let j = i; j > floor[0]; j--) {
+      const nums = await headings(j);
+      if (nums.length) return Math.max(...nums);
+    }
+    return floor[1];
+  };
+  return {
+    // The latest chapter: the last numbered heading in the book.
+    latest: () => endChapter(pages.length - 1),
+    // Index of the first page that reaches chapter n (holds 第n章, or the next
+    // chapter if n is missing). Interpolation search, alternating with plain
+    // bisection so an uneven book can't make it crawl: a few page loads.
+    async pageOf(n) {
+      let lo = [-1, 0];
+      let hi = [pages.length - 1, await endChapter(pages.length - 1)];
+      if (hi[1] < n) return null;
+      for (let step = 0; hi[0] - lo[0] > 1; step++) {
+        const span = hi[0] - lo[0];
+        const guess = step % 2 === 0 && hi[1] > lo[1]
+          ? lo[0] + Math.round(((n - lo[1]) / (hi[1] - lo[1])) * span)
+          : lo[0] + Math.floor(span / 2);
+        const mid = Math.min(Math.max(guess, lo[0] + 1), hi[0] - 1);
+        const ch = await endChapter(mid, lo);
+        if (ch >= n) hi = [mid, ch]; else lo = [mid, ch];
+      }
+      return hi[0];
+    },
+  };
+};
+
+// readToc for such a book: chapters 1..latest (position = number, so a
+// position goes back as fromChapter like on other sites), each pointing at
+// the book page since a chapter has no page of its own. The real page list is
+// under `pages`. Numbers the book skips still get an entry.
+export const pagedToc = async (ctx, { bookUrl, pages, ...meta }) => {
+  const latest = await pagedBook(ctx, pages).latest();
+  const chapters = [];
+  for (let n = 1; n <= latest; n++) chapters.push({ position: n, number: n, title: `第${n}章`, url: bookUrl });
+  return { ...meta, chapters, pages: pages.map((p, i) => ({ position: i + 1, url: p.url })) };
+};
+
+// resolveStart for such a book: the first page reaching chapter fromChapter,
+// with meta.minChapter set so pageRecords drops what precedes it there.
+export const resolvePagedStart = async (ctx, { pages, fromChapter }) => {
+  if (!fromChapter || fromChapter <= 1) return pages[0].url;
+  const i = await pagedBook(ctx, pages).pageOf(fromChapter);
+  if (i == null) throw new Error(`chapter ${fromChapter} not found (the book's last chapter is lower)`);
+  ctx.setMeta({ minChapter: fromChapter });
+  return pages[i].url;
 };
 
 // ---------------------------------------------------------------------------

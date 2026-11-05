@@ -217,3 +217,31 @@ test('jpxs123: book name from either page\'s h1', async () => {
   const { splitPage } = await import('../src/sites/common.js');
   assert.deepEqual(splitPage(['結尾。', '第八十二章 提議與第十集', '正文']).map((p) => p.title), [null, '第八十二章 提議與第十集']);
 });
+
+test('paged books: latest chapter and the page a chapter starts on', async () => {
+  const { pagedBook, pageRecords } = await import('../src/sites/common.js');
+  // 12 pages; headings per page (page 5 is all one long chapter).
+  const book = [[1], [2], [3, 4], [5], [], [6], [7, 8], [9], [10, 11], [12], [13], []];
+  const pages = book.map((_, i) => ({ url: `p${i}` }));
+  let at = null, loads = 0;
+  const ctx = {
+    settings: { delayMs: 0 }, sleep: async () => {},
+    goto: async (u) => { at = u; loads++; },
+    call: async () => ({ lines: book[Number(at.slice(1))].flatMap((n) => [`第${n}章 标题`, '正文。']) }),
+  };
+  assert.equal(await pagedBook(ctx, pages).latest(), 13); // walks back past the empty last page
+  for (const [n, want] of [[1, 0], [4, 2], [6, 5], [8, 6], [11, 8], [13, 10]]) {
+    loads = 0;
+    assert.equal(await pagedBook(ctx, pages).pageOf(n), want, `chapter ${n}`);
+    assert.ok(loads <= 8, `chapter ${n} took ${loads} loads`);
+  }
+  assert.equal(await pagedBook(ctx, pages).pageOf(14), null);
+
+  // Starting at chapter 4 on the page that also ends 2 and holds 3.
+  const meta = { minChapter: 4 };
+  const rctx = { meta, setMeta: (p) => Object.assign(meta, p) };
+  const recs = pageRecords(rctx, ['二的结尾。', '第3章 三', '三。', '第4章 四', '四。'], { firstPage: false });
+  assert.deepEqual(recs.map((r) => r.title), ['第4章 四']);
+  assert.equal(meta.minChapter, null);
+  assert.deepEqual(pageRecords(rctx, ['四续。', '第5章 五'], { firstPage: false }).map((r) => r.title), ['第4章 四', '第5章 五']);
+});

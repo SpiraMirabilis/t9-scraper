@@ -11,9 +11,11 @@
 // next. capture() splits each page at its headings (common.js pageRecords).
 // The last page has no 下一页 link.
 //
-// The TOC lists pages, not chapters, so fromChapter is a page number (第N页).
+// The page list says nothing about chapters, so the TOC reads the latest
+// chapter off the last page, and fromChapter (a chapter number, as elsewhere)
+// is found by searching the pages: see pagedBook in common.js.
 
-import { pageRecords } from './common.js';
+import { pageRecords, pagedToc, resolvePagedStart } from './common.js';
 
 // Top-level sections that aren't book categories.
 const NOT_BOOK_RE = /^(zuozhe|tuijian|tags_\w+|top|so|e|skin|danmei)$/i;
@@ -94,33 +96,30 @@ export function makeSite(common) {
 
 export const worlds = {};
 
-// The book's page list. Position = page number = fromChapter value.
-export async function readToc(ctx, { url }) {
+// The book page: name, author and the page list.
+async function bookPage(ctx, url) {
   const u = new URL(url);
-  await ctx.goto(`${u.origin}/${bookId(u)}.html`);
-  const entries = (await ctx.call('tocEntries')).filter((e) => readerPage(e.url));
-  if (!entries.length) throw new Error('no pages found on the book page');
+  const bookUrl = `${u.origin}/${bookId(u)}.html`;
+  await ctx.goto(bookUrl);
+  const pages = (await ctx.call('tocEntries')).filter((e) => readerPage(e.url));
+  if (!pages.length) throw new Error('no pages found on the book page');
   const { bookName, author } = parseBookTitle(await ctx.call('tocTitle'));
-  return {
-    bookName,
-    ...(author ? { author } : {}),
-    chapters: entries.map((e, i) => ({ position: i + 1, ...e })),
-  };
+  return { bookUrl, pages, bookName, ...(author ? { author } : {}) };
 }
 
-// fromChapter = page number (第N页), i.e. reader page _<N+1>.
+// Chapters 1..latest, read off the last page (common.js pagedToc).
+export const readToc = async (ctx, { url }) => pagedToc(ctx, await bookPage(ctx, url));
+
+// fromChapter = chapter number; its page is found by search (common.js).
 export async function resolveStart(ctx, { url, fromChapter, fromUrl }) {
   if (fromUrl) return fromUrl;
   if (readerPage(url) && !fromChapter) return url;
-  const n = fromChapter || 1;
-  const { bookName, author, chapters } = await readToc(ctx, { url });
+  const { pages, bookName, author } = await bookPage(ctx, url);
   const patch = {};
   if (bookName && !ctx.meta.bookName) patch.bookName = bookName;
   if (author && !ctx.meta.author) patch.author = author;
   if (Object.keys(patch).length) ctx.setMeta(patch);
-  const entry = chapters[n - 1];
-  if (!entry) throw new Error(`page ${n} not found on the book page (it has ${chapters.length})`);
-  return entry.url;
+  return resolvePagedStart(ctx, { pages, fromChapter });
 }
 
 export const isEndUrl = () => false;
