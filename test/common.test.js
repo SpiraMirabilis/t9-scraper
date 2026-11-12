@@ -328,6 +328,80 @@ test('jpxs123: TOC and chapter records from the txt', async () => {
   assert.deepEqual(recs.map((r) => r.title), ['第4章 四']);
   assert.equal(recs[0].text, '四。');
   assert.equal(meta.intro, '簡介正文。');
-  assert.equal((await jp.bookRecords(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html' })).length, 4);
+  const all = await jp.bookRecords(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html' });
+  assert.deepEqual(all.map((r) => r.title), ['第1章 一', '第2章 二', '第4章 四']); // the doubled 第2章 is merged
+  assert.equal(all[1].text, '二。\n第2章 二又\n又。');
   await assert.rejects(jp.bookRecords(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html', fromChapter: 5 }), /chapter 5 not found/);
+});
+
+test('book text numbering: stray, doubled, unnumbered and restarting headings', async () => {
+  const { numberBookChapters } = await import('../src/sites/common.js');
+  const ch = (title, text) => ({ title, text });
+  const { chapters, repairs } = numberBookChapters([
+    ch('楔子', '序。'),
+    ch('第1章 一', '一。'),
+    ch('第2章 二', '二。'),
+    ch('第2章 二又', '二。'),      // doubled, same text: dropped
+    ch('第9章 三', '三。'),        // stray, repeats the next chapter: dropped
+    ch('第3章 三', '三。'),
+    ch('第3章 三外', '外。'),      // doubled, other text: appended
+    ch('第1章 錯', '四。'),        // stray with one free slot: renumbered 4
+    ch('第5章 五', '五。'),
+    ch('番外 甲', '甲。'),         // unnumbered: appended
+    ch('第99章 怪', '怪。'),       // stray, no free slot, other text: appended
+    ch('第6章 六', '六。'),
+    ch('第一章 新卷', '新。'),     // numbering restarts: the rest is left out
+    ch('第二章 新卷二', '新二。'),
+  ]);
+  assert.deepEqual(chapters.map((c) => c.number), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(chapters.map((c) => c.title), ['第1章 一', '第2章 二', '第3章 三', '第4章 錯', '第5章 五', '第6章 六']);
+  assert.equal(chapters[0].text, '楔子\n序。\n一。');
+  assert.equal(chapters[1].text, '二。');
+  assert.equal(chapters[2].text, '三。\n第3章 三外\n外。');
+  assert.equal(chapters[3].text, '四。');
+  assert.equal(chapters[4].text, '五。\n番外 甲\n甲。\n第99章 怪\n怪。');
+  assert.equal(repairs.length, 8);
+});
+
+// The 9039 regression: 第1958章 before 1598 (same text), a doubled 1607 and
+// an extra 1636 the TOC doesn't list. Every fromUrl past them gets exactly
+// the TOC entries from fromUrl.
+test('jpxs123: fromUrl past stray and doubled headings', async () => {
+  const jp = await import('../src/sites/jpxs123.js');
+  const lines = ['書', '作者：x'];
+  const add = (n, title, body) => lines.push(`第${n}章 ${title}`, `　　${body}`);
+  for (let n = 1590; n <= 1700; n++) {
+    if (n === 1598) add(1958, '一片赤誠', '正文1598。');
+    if (n === 1607) add(1607, '消失的第六位病人', '正文1607。');
+    add(n, n === 1598 || n === 1958 ? '一片赤誠' : `題${n}`, `正文${n}。`);
+    if (n === 1636) add(1636, '赤色流星', '流星。');
+  }
+  for (let n = 1701; n <= 1960; n++) add(n, n === 1958 ? '一片赤誠' : `題${n}`, `正文${n}。`);
+  const meta = {};
+  const ctx = {
+    meta, settings: { delayMs: 0 }, sleep: async () => {}, goto: async () => {},
+    setMeta: (p) => Object.assign(meta, p),
+    call: async (name) => {
+      if (name === 'bookInfo') return { title: '書(1-1960)', author: 'x', date: '2026-11-11', txtHref: 'https://jpxs123.com/txt/1-9039-0.html' };
+      if (name === 'downloadHref') return 'https://jpxs123.com/e/DownSys/doaction.php?id=9039';
+      if (name === 'fetchText') return { text: lines.join('\n') };
+      throw new Error(name);
+    },
+  };
+  const url = 'https://jpxs123.com/book/9039.html';
+  const toc = await jp.readToc(ctx, { url });
+  assert.equal(toc.chapters[1958 - 1].title, '第1958章 一片赤誠');
+  assert.equal(toc.chapters[1598 - 1].title, '第1598章 一片赤誠');
+  for (const from of [1597, 1598, 1600, 1607, 1636, 1645, 1958]) {
+    const recs = await jp.bookRecords(ctx, { url, fromUrl: `${url}?chapter=${from}` });
+    const nums = recs.map((r) => Number(new URL(r.url).searchParams.get('chapter')));
+    assert.equal(nums[0], from, `fromUrl ${from}`);
+    assert.equal(new Set(nums).size, nums.length);
+    nums.forEach((n, i) => assert.equal(n, from + i));
+    for (const r of recs) assert.match(r.text, new RegExp(`正文${Number(new URL(r.url).searchParams.get('chapter'))}。`));
+  }
+  const at1636 = await jp.bookRecords(ctx, { url, fromUrl: `${url}?chapter=1636` });
+  assert.equal(at1636[0].text, '正文1636。\n第1636章 赤色流星\n流星。');
+  const at1607 = await jp.bookRecords(ctx, { url, fromUrl: `${url}?chapter=1607` });
+  assert.equal(at1607[0].title, '第1607章 消失的第六位病人'); // the doubled one had the same text
 });

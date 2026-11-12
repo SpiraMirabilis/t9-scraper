@@ -17,7 +17,7 @@
 // plus ?chapter=N (common.js pagedChapterUrl), which clients pass back as
 // fromUrl.
 
-import { parseBookText, parseChapterNumber, isHeading, pagedChapterUrl, chapterFromUrl } from './common.js';
+import { parseBookText, numberBookChapters, parseChapterNumber, isHeading, pagedChapterUrl, chapterFromUrl } from './common.js';
 import { cachedBookText } from '../booktext.js';
 
 const PATH_RE = /^\/([a-z]+)\/(\d+)(?:\/(\d+))?\.html$/i;
@@ -114,22 +114,23 @@ async function loadBook(ctx, url) {
       return r.text;
     },
   });
-  const book = parseBookText(text);
-  if (!book.chapters.length) throw new Error(`no chapter headings in the txt of ${bookUrl}`);
-  ctx.progress?.({ bookText: cached ? 'cached' : 'downloaded' });
-  return { bookUrl, bookName: parseBookName(info.title), author: info.author, ...book };
+  const parsed = parseBookText(text);
+  // One chapter per number (see numberBookChapters): the TOC urls and the
+  // fromUrl lookup go by number, so the txt's stray or doubled headings
+  // would otherwise misplace the range or repeat a url.
+  const { chapters, repairs } = numberBookChapters(parsed.chapters);
+  if (!chapters.length) throw new Error(`no chapter headings in the txt of ${bookUrl}`);
+  if (repairs.length) console.warn(`[jpxs123 ${bookId(u)}] book text: ${repairs.join('; ')}`);
+  ctx.progress?.({ bookText: cached ? 'cached' : 'downloaded', ...(repairs.length ? { bookTextRepairs: repairs.length } : {}) });
+  return { bookUrl, bookName: parseBookName(info.title), author: info.author, intro: parsed.intro, chapters };
 }
 
 // Chapters 1..latest (position = number). Numbers the book skips still get
 // an entry, so chapterCount == the latest chapter, as clients expect.
 export async function readToc(ctx, { url }) {
   const b = await loadBook(ctx, url);
-  const titles = new Map();
-  for (const c of b.chapters) {
-    const n = parseChapterNumber(c.title);
-    if (Number.isFinite(n) && !titles.has(n)) titles.set(n, c.title);
-  }
-  const latest = titles.size ? Math.max(...titles.keys()) : 0;
+  const titles = new Map(b.chapters.map((c) => [c.number, c.title]));
+  const latest = b.chapters[b.chapters.length - 1].number;
   const chapters = [];
   for (let n = 1; n <= latest; n++) {
     chapters.push({ position: n, number: n, title: titles.get(n) || `第${n}章`, url: pagedChapterUrl(b.bookUrl, n) });
@@ -159,15 +160,22 @@ export async function bookRecords(ctx, { url, fromChapter, fromUrl }) {
   if (b.intro && !ctx.meta.intro) patch.intro = b.intro;
   if (Object.keys(patch).length) ctx.setMeta(patch);
 
+  // Numbers increase strictly, so this is chapter `from` itself, or the next
+  // one when the book skips that number.
   let start = 0;
   if (from > 1) {
-    start = b.chapters.findIndex((c) => parseChapterNumber(c.title) >= from);
+    start = b.chapters.findIndex((c) => c.number >= from);
     if (start < 0) throw new Error(`chapter ${from} not found (the book's last chapter is lower)`);
   }
-  return b.chapters.slice(start).map((c) => {
-    const n = parseChapterNumber(c.title);
-    return { ...c, url: Number.isFinite(n) ? pagedChapterUrl(b.bookUrl, n) : b.bookUrl };
-  });
+  const recs = b.chapters.slice(start).map((c) => ({ title: c.title, text: c.text, url: pagedChapterUrl(b.bookUrl, c.number) }));
+  // The contract clients rely on: the batch starts at the asked chapter and
+  // no url repeats. Fail the job rather than return another range.
+  const n0 = chapterFromUrl(recs[0].url);
+  const urls = new Set(recs.map((r) => r.url));
+  if ((from > 1 && n0 < from) || urls.size !== recs.length) {
+    throw new Error(`book text misaligned at chapter ${from || 1} (first record ${recs[0].url})`);
+  }
+  return recs;
 }
 
 // The runner never walks pages for this site (bookRecords), but the adapter
