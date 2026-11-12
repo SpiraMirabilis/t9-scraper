@@ -128,6 +128,10 @@ test('site routing', () => {
   const nv = 'https://www.novels.com.tw/novels/no5fad5ed3de58ffd0ab2402181e1c23fcf70678afef5f782be327c9c7bb8f211e/';
   assert.equal(adapterFor(nv).name, 'novelscomtw');
   assert.equal(adapterFor(nv + '209058032_2.html').bookId(new URL(nv + '209058032_2.html')), 'no5fad5ed3de58ffd0ab2402181e1c23fcf70678afef5f782be327c9c7bb8f211e');
+  // Some books have a pinyin slug for an id instead of a hex hash.
+  const slug = 'https://www.novels.com.tw/novels/nowozaijingshenbingyuanxuezhanshen/';
+  assert.equal(adapterFor(slug).bookId(new URL(slug)), 'nowozaijingshenbingyuanxuezhanshen');
+  assert.equal(adapterFor(slug + '1234_2.html').name, 'novelscomtw');
   assert.equal(adapterFor('https://www.novels.com.tw/nosort/1/1/'), null);
   assert.equal(adapterFor('https://www.novels.com.tw/author/x/'), null);
   assert.equal(adapterFor('https://evil-twkan.com/book/1.html'), null);

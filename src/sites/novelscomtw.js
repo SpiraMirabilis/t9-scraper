@@ -19,7 +19,7 @@
 // and a truncated watermark ("第一時間獲取最新章節，請訪問So" then ".") sits
 // mid-chapter.
 
-const CHAPTER_PATH_RE = /^\/novels\/no[0-9a-f]+\/\d+(?:_\d+)?\.html$/i;
+const CHAPTER_PATH_RE = /^\/novels\/no[0-9a-z]+\/\d+(?:_\d+)?\.html$/i;
 const PAGE_OF_RE = /[（(]\s*(\d+)\s*\/\s*(\d+)\s*[）)]\s*$/;
 
 export const name = 'novelscomtw';
@@ -28,7 +28,7 @@ export const hosts = ['novels.com.tw'];
 export const onePagePerChapter = false;
 export const defaults = { delayMs: 3000 };
 export const match = (u) => /(^|\.)novels\.com\.tw$/i.test(u.hostname);
-export const bookId = (u) => (u.pathname.match(/^\/novels\/(no[0-9a-f]+)(?:\/|$)/i) || [])[1] || null;
+export const bookId = (u) => (u.pathname.match(/^\/novels\/(no[0-9a-z]+)(?:\/|$)/i) || [])[1] || null;
 const isChapterUrl = (href) => {
   try { return CHAPTER_PATH_RE.test(new URL(href).pathname); } catch { return false; }
 };
