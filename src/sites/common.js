@@ -92,10 +92,13 @@ export const groupChapters = (pages, { headerRe = CN_HEADER_RE } = {}) => {
         last._parts.push(joinParts(last._parts.pop(), body));
       } else if (body) last._parts.push(body);
       last._sec.push(...sec);
+      last._lost += p.lostLines || 0;
+      last._recovered += p.recoveredLines || 0;
     } else {
       chapters.push({
         key, title, number: p.number, published: p.published,
         sourceUrls: [p.url], _parts: body ? [body] : [], _sec: sec,
+        _lost: p.lostLines || 0, _recovered: p.recoveredLines || 0,
       });
     }
   }
@@ -113,6 +116,10 @@ export const groupChapters = (pages, { headerRe = CN_HEADER_RE } = {}) => {
       ...(c.published ? { published: c.published } : {}),
       // Anti-scrape <canvas> lines found in this chapter (twkan only).
       ...(c._sec.length ? { secCanvasCount: c._sec.length, secCanvases: c._sec } : {}),
+      // Story lines lost to the source (novels.com.tw ad slots), each a
+      // marker in the text, and ones the adapter got back.
+      ...(c._lost ? { lostLineCount: c._lost } : {}),
+      ...(c._recovered ? { recoveredLineCount: c._recovered } : {}),
       text: c._parts.join('\n\n\n'),
     };
   });

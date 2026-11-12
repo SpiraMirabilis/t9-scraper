@@ -38,15 +38,44 @@ export function makeSite(common) {
   const { textOf } = common;
   const JUNK_RE = /^(?:[".]+|[（(]?本章完[）)]?|第一時間獲取最新章節.{0,20})$/;
 
-  // Body paragraphs are direct <p> children of #article; the ads are <div>s
-  // between them.
+  // Body paragraphs are direct <p> children of #article; most ads are <div>s
+  // between them. The page ships the chapter AES-encrypted
+  // (window.encryptedContent) and gfncgd.js decrypts it into #chapter-content;
+  // the decrypted text is complete, but after that one <p> per page (the 16th,
+  // when there is one) has its line replaced by an ad tag:
+  // <p><script src=".../ad2-native-crazy.js"></script><script></script></p>.
+  // When a slot turns up, the adapter re-runs the decryptor (decryptedHtml)
+  // and mergeDecrypted swaps its lines in; failing that, each slot stays as
+  // LOST in the text.
+  const LOST = '[[novelscomtw: line replaced by an ad]]';
+  const clean = (p) => (p.textContent || '').replace(/\u00a0/g, ' ').trim();
+  const isAdSlot = (p) => !clean(p) && !!p.querySelector('script');
+
   const grabContent = () => {
     const art = document.getElementById('article');
     if (!art) return null;
-    const lines = [...art.querySelectorAll(':scope > p')]
-      .map((p) => (p.textContent || '').replace(/ /g, ' ').trim())
-      .filter((t) => t && !JUNK_RE.test(t));
-    return lines.length ? lines.join('\n') : null;
+    const lines = [];
+    let lost = 0;
+    for (const p of art.querySelectorAll(':scope > p')) {
+      let t = clean(p);
+      if (!t && isAdSlot(p)) { t = LOST; lost++; }
+      if (t && !JUNK_RE.test(t)) lines.push(t);
+    }
+    return lines.some((l) => l !== LOST) ? { lines, lost } : null;
+  };
+
+  // The decrypted page, as lines. Used only if it holds every line the
+  // page shows, in order. Lines beyond those are the ones the ads took; none
+  // means the ad was inserted between lines rather than over one.
+  const fromDecrypted = (html, shown) => {
+    if (!html) return null;
+    const doc = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html');
+    if (doc.querySelector('script')) return null;
+    const lines = [...doc.querySelectorAll('p')].map(clean).filter((t) => t && !JUNK_RE.test(t));
+    const want = shown.filter((l) => l !== LOST);
+    let j = 0;
+    for (const l of lines) if (j < want.length && l === want[j]) j++;
+    return j === want.length ? lines : null;
   };
 
   const realHref = (a) => {
@@ -57,15 +86,16 @@ export function makeSite(common) {
 
   return {
     async capture() {
-      let text = grabContent();
-      for (let i = 0; !text && i < 3; i++) { // slow-load fallback only
+      let got = grabContent();
+      for (let i = 0; !got && i < 3; i++) { // slow-load fallback only
         await new Promise((r) => setTimeout(r, 800));
-        text = grabContent();
+        got = grabContent();
       }
       const info = document.querySelector('.text_title .text_info');
       return {
         title: textOf(document.querySelector('.text_title h1')),
-        text,
+        lines: got && got.lines,
+        lostLines: got ? got.lost : 0,
         bookName: textOf(info && info.querySelector('a[href*="/novels/"]')),
         author: textOf(info && info.querySelector('a[href*="/author/"]')),
       };
@@ -83,13 +113,59 @@ export function makeSite(common) {
         count: m ? parseInt(m[1], 10) : null,
       };
     },
+    // The decrypted lines in place of the captured ones, or null. Checked
+    // against what capture() saw, not the live page: re-running the
+    // decryptor also makes the page re-render its text.
+    mergeDecrypted({ html, lines }) {
+      const dec = fromDecrypted(html, lines);
+      return dec && { lines: dec, recovered: dec.length - lines.filter((l) => l !== LOST).length };
+    },
+    // Main world. Runs the site's decryptor (gfncgd.js) a second time with
+    // crypto.subtle.decrypt wrapped, and returns the plaintext it produced:
+    // the chapter's <p>s before an ad took one. The script runs its work on
+    // DOMContentLoaded, so that is fired again; it writes into a hidden stand-in
+    // #chapter-content, and the real one gets its id back afterwards.
+    async decryptedHtml() {
+      if (!window.encryptedContent) return null;
+      const out = [];
+      const subtle = crypto.subtle;
+      const orig = subtle.decrypt;
+      subtle.decrypt = async function (...a) {
+        const r = await orig.apply(this, a);
+        try { out.push(new TextDecoder().decode(r)); } catch {}
+        return r;
+      };
+      const real = document.getElementById('chapter-content');
+      const tmp = document.createElement('div');
+      tmp.style.display = 'none';
+      if (real) real.id = '';
+      tmp.id = 'chapter-content';
+      document.body.appendChild(tmp);
+      const sc = document.createElement('script');
+      try {
+        await new Promise((res, rej) => {
+          sc.src = `/static/shipsay/js/gfncgd.js?r=${Date.now()}`;
+          sc.onload = res;
+          sc.onerror = () => rej(new Error('gfncgd.js failed to load'));
+          document.body.appendChild(sc);
+        });
+        document.dispatchEvent(new Event('DOMContentLoaded'));
+        for (let i = 0; i < 30 && !out.length; i++) await new Promise((r) => setTimeout(r, 100));
+      } finally {
+        subtle.decrypt = orig;
+        tmp.remove();
+        sc.remove();
+        if (real) real.id = 'chapter-content';
+      }
+      return out.find((t) => /<p[\s>]/i.test(t)) || null;
+    },
     nextChapterHref() {
       return realHref(document.getElementById('next_url'));
     },
   };
 }
 
-export const worlds = {};
+export const worlds = { decryptedHtml: 'main' };
 
 // Full chapter list from the book page. Position = fromChapter value.
 export async function readToc(ctx, { url }) {
@@ -139,13 +215,24 @@ export const pageOf = (title) => {
 
 export async function capture(ctx) {
   const r = await ctx.call('capture');
-  if (!r.text) return null;
+  if (!r.lines) return null;
+  let { lines, lostLines } = r, recoveredLines = 0;
+  if (lostLines) { // an ad took a line: re-run the decryptor and take its text
+    const html = await ctx.call('decryptedHtml').catch(() => null);
+    const m = html && await ctx.call('mergeDecrypted', { html, lines });
+    if (m) { lines = m.lines; recoveredLines = m.recovered; lostLines = 0; }
+  }
   const patch = {};
   if (r.bookName && !ctx.meta.bookName) patch.bookName = r.bookName;
   if (r.author && !ctx.meta.author) patch.author = r.author;
   if (Object.keys(patch).length) ctx.setMeta(patch);
   const pg = pageOf(r.title);
-  return { title: r.title, text: r.text, ...(pg && pg.page > 1 ? { extra: { joinPrev: true } } : {}) };
+  const extra = {
+    ...(pg && pg.page > 1 ? { joinPrev: true } : {}),
+    ...(lostLines ? { lostLines } : {}),
+    ...(recoveredLines ? { recoveredLines } : {}),
+  };
+  return { title: r.title, text: lines.join('\n'), ...(Object.keys(extra).length ? { extra } : {}) };
 }
 
 export const isEndAfterCapture = () => false;
