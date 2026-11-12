@@ -304,7 +304,7 @@ test('book text cache: reused while fresh and unchanged', async () => {
 test('jpxs123: TOC and chapter records from the txt', async () => {
   const jp = await import('../src/sites/jpxs123.js');
   const txt = ['書', '作者：x', '簡介：', '簡介正文。',
-    '第1章 一', '　　一。', '第2章 二', '　　二。', '第2章 二又', '　　又。', '第4章 四', '　　四。'].join('\n');
+    '第1章 一', '　　一。', '第2章 二', '　　二。', '第2章 二又', '　　又。', '第3章 三', '　　三。', '第5章 五', '　　五。'].join('\n');
   let calls = 0;
   const meta = {};
   const ctx = {
@@ -312,7 +312,7 @@ test('jpxs123: TOC and chapter records from the txt', async () => {
     setMeta: (p) => Object.assign(meta, p),
     call: async (name) => {
       calls++;
-      if (name === 'bookInfo') return { title: '書(1-4)', author: 'x', date: '2026-01-01', txtHref: 'https://www.jpxs123.com/txt/1-9-0.html' };
+      if (name === 'bookInfo') return { title: '書(1-5)', author: 'x', date: '2026-01-01', txtHref: 'https://www.jpxs123.com/txt/1-9-0.html' };
       if (name === 'downloadHref') return 'https://www.jpxs123.com/e/DownSys/doaction.php?id=9';
       if (name === 'fetchText') return { text: txt };
       throw new Error(name);
@@ -320,47 +320,49 @@ test('jpxs123: TOC and chapter records from the txt', async () => {
   };
   const toc = await jp.readToc(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html' });
   assert.equal(toc.bookName, '書');
-  assert.deepEqual(toc.chapters.map((c) => c.title), ['第1章 一', '第2章 二', '第3章', '第4章 四']);
-  assert.equal(toc.chapters[2].url, 'https://www.jpxs123.com/cyjk/9.html?chapter=3');
+  assert.deepEqual(toc.chapters.map((c) => c.title), ['第1章 一', '第2章 二', '第3章 三', '第4章', '第5章 五']);
+  assert.equal(toc.chapters[3].url, 'https://www.jpxs123.com/cyjk/9.html?chapter=4');
   calls = 0;
-  const recs = await jp.bookRecords(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html', fromUrl: toc.chapters[2].url });
+  const recs = await jp.bookRecords(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html', fromUrl: toc.chapters[3].url });
   assert.equal(calls, 1); // the book page only: the txt came from the cache
-  assert.deepEqual(recs.map((r) => r.title), ['第4章 四']);
-  assert.equal(recs[0].text, '四。');
+  assert.deepEqual(recs.map((r) => r.title), ['第5章 五']); // no 第4章: the next one
+  assert.equal(recs[0].text, '五。');
   assert.equal(meta.intro, '簡介正文。');
   const all = await jp.bookRecords(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html' });
-  assert.deepEqual(all.map((r) => r.title), ['第1章 一', '第2章 二', '第4章 四']); // the doubled 第2章 is merged
+  assert.deepEqual(all.map((r) => r.title), ['第1章 一', '第2章 二', '第3章 三', '第5章 五']); // the doubled 第2章 is merged
   assert.equal(all[1].text, '二。\n第2章 二又\n又。');
-  await assert.rejects(jp.bookRecords(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html', fromChapter: 5 }), /chapter 5 not found/);
+  await assert.rejects(jp.bookRecords(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html', fromChapter: 6 }), /chapter 6 not found/);
 });
 
-test('book text numbering: stray, doubled, unnumbered and restarting headings', async () => {
+test('book text numbering: stubs, strays, repeats, doubles, unnumbered, restarts', async () => {
   const { numberBookChapters } = await import('../src/sites/common.js');
   const ch = (title, text) => ({ title, text });
+  const long = Array.from({ length: 300 }, (_, i) => String.fromCharCode(0x4e00 + i)).join('');
+  const revised = `${long.slice(0, 150)}改${long.slice(151)}`;
   const { chapters, repairs } = numberBookChapters([
-    ch('楔子', '序。'),
+    ch('楔子', '序。'),              // unnumbered, before any: kept with 第1章
     ch('第1章 一', '一。'),
+    ch('第2章 二', ''),              // stub: dropped
     ch('第2章 二', '二。'),
-    ch('第2章 二又', '二。'),      // doubled, same text: dropped
-    ch('第9章 三', '三。'),        // stray, repeats the next chapter: dropped
+    ch('第9章 三', '三。'),          // stray, repeats 第3章: dropped
     ch('第3章 三', '三。'),
-    ch('第3章 三外', '外。'),      // doubled, other text: appended
-    ch('第1章 錯', '四。'),        // stray with one free slot: renumbered 4
-    ch('第5章 五', '五。'),
-    ch('番外 甲', '甲。'),         // unnumbered: appended
-    ch('第99章 怪', '怪。'),       // stray, no free slot, other text: appended
+    ch('第3章 三外', '外。'),        // doubled, 4 isn't free: appended
+    ch('第4章 四', long),
+    ch('第4章 肆', revised),         // a revised copy: dropped
+    ch('第1章 錯', '五。'),          // out of order, 5 is free: renumbered
     ch('第6章 六', '六。'),
-    ch('第一章 新卷', '新。'),     // numbering restarts: the rest is left out
+    ch('番外 甲', '甲。'),           // unnumbered: appended
+    ch('第8章 八', '八。'),
+    ch('第8章 捌', '八八。'),        // doubled, last chapter: appended
+    ch('第一章 新卷', '新。'),       // numbering restarts: the rest is left out
     ch('第二章 新卷二', '新二。'),
   ]);
-  assert.deepEqual(chapters.map((c) => c.number), [1, 2, 3, 4, 5, 6]);
-  assert.deepEqual(chapters.map((c) => c.title), ['第1章 一', '第2章 二', '第3章 三', '第4章 錯', '第5章 五', '第6章 六']);
-  assert.equal(chapters[0].text, '楔子\n序。\n一。');
-  assert.equal(chapters[1].text, '二。');
-  assert.equal(chapters[2].text, '三。\n第3章 三外\n外。');
-  assert.equal(chapters[3].text, '四。');
-  assert.equal(chapters[4].text, '五。\n番外 甲\n甲。\n第99章 怪\n怪。');
-  assert.equal(repairs.length, 8);
+  assert.deepEqual(chapters.map((c) => c.number), [1, 2, 3, 4, 5, 6, 8]);
+  assert.deepEqual(chapters.map((c) => c.title), ['第1章 一', '第2章 二', '第3章 三', '第4章 四', '第5章 錯', '第6章 六', '第8章 八']);
+  assert.deepEqual(chapters.map((c) => c.text), [
+    '楔子\n序。\n一。', '二。', '三。\n第3章 三外\n外。', long, '五。', '六。\n番外 甲\n甲。', '八。\n第8章 捌\n八八。',
+  ]);
+  assert.equal(repairs.length, 9);
 });
 
 // The 9039 regression: 第1958章 before 1598 (same text), a doubled 1607 and
@@ -370,13 +372,22 @@ test('jpxs123: fromUrl past stray and doubled headings', async () => {
   const jp = await import('../src/sites/jpxs123.js');
   const lines = ['書', '作者：x'];
   const add = (n, title, body) => lines.push(`第${n}章 ${title}`, `　　${body}`);
-  for (let n = 1590; n <= 1700; n++) {
+  for (let n = 1500; n <= 1700; n++) {
+    if (n === 1509) lines.push('第1509章 電梯驚魂'); // a title-only stub
+    if (n === 1510) { // no 1510; 1511 twice, once as 第1011章, each after a stub
+      lines.push('第1011章 後遺症'); add(1011, '後遺症', '正文1511。');
+      lines.push('第1511章 後遺症'); add(1511, '後遺症', '正文1511。');
+      n = 1511; continue;
+    }
     if (n === 1598) add(1958, '一片赤誠', '正文1598。');
     if (n === 1607) add(1607, '消失的第六位病人', '正文1607。');
     add(n, n === 1598 || n === 1958 ? '一片赤誠' : `題${n}`, `正文${n}。`);
     if (n === 1636) add(1636, '赤色流星', '流星。');
   }
-  for (let n = 1701; n <= 1960; n++) add(n, n === 1958 ? '一片赤誠' : `題${n}`, `正文${n}。`);
+  for (let n = 1701; n <= 1960; n++) {
+    if (n === 1949) for (let k = 1849; k <= 1851; k++) add(k, `題${k + 100}`, `正文${k + 100}。`); // repeats of 1949-1951
+    add(n, n === 1958 ? '一片赤誠' : `題${n}`, `正文${n}。`);
+  }
   const meta = {};
   const ctx = {
     meta, settings: { delayMs: 0 }, sleep: async () => {}, goto: async () => {},
@@ -392,12 +403,12 @@ test('jpxs123: fromUrl past stray and doubled headings', async () => {
   const toc = await jp.readToc(ctx, { url });
   assert.equal(toc.chapters[1958 - 1].title, '第1958章 一片赤誠');
   assert.equal(toc.chapters[1598 - 1].title, '第1598章 一片赤誠');
-  for (const from of [1597, 1598, 1600, 1607, 1636, 1645, 1958]) {
+  assert.equal(toc.chapters[1510 - 1].title, '第1510章'); // the book has none
+  for (const from of [1505, 1510, 1597, 1598, 1600, 1607, 1636, 1645, 1940, 1958]) {
     const recs = await jp.bookRecords(ctx, { url, fromUrl: `${url}?chapter=${from}` });
     const nums = recs.map((r) => Number(new URL(r.url).searchParams.get('chapter')));
-    assert.equal(nums[0], from, `fromUrl ${from}`);
-    assert.equal(new Set(nums).size, nums.length);
-    nums.forEach((n, i) => assert.equal(n, from + i));
+    assert.equal(nums[0], from === 1510 ? 1511 : from, `fromUrl ${from}`);
+    nums.forEach((n, i) => assert.equal(n, i ? nums[i - 1] + (nums[i - 1] === 1509 ? 2 : 1) : nums[0]));
     for (const r of recs) assert.match(r.text, new RegExp(`正文${Number(new URL(r.url).searchParams.get('chapter'))}。`));
   }
   const at1636 = await jp.bookRecords(ctx, { url, fromUrl: `${url}?chapter=1636` });

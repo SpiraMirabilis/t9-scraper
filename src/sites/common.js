@@ -217,69 +217,119 @@ export const parseBookText = (text) => {
 
 // parseBookText's chapters -> { chapters: [{ number, title, text }], repairs }
 // with numbers strictly increasing, so each number (and so each
-// ?chapter=N url) has exactly one chapter. Real txt files break that:
-//   - a stray number between its neighbours (第1958章 between 1597 and
-//     1598): renumbered when exactly one number is free there, else dropped
-//     if its text repeats the next chapter's, else appended to the previous;
-//   - a doubled number (two 第1607章): dropped if the text repeats, else
-//     appended to the first;
-//   - an unnumbered heading (番外, 楔子): appended to the previous chapter
-//     (prepended to the first one if it comes before any).
-// Appended text keeps its heading as a line, so nothing is lost. Numbering
-// that restarts (per-volume 第一章) ends the list there: past that point the
-// numbers no longer identify a chapter. `repairs` describes each fix.
-const sameText = (a, b) => a.replace(/\s+/g, '') === b.replace(/\s+/g, '');
+// ?chapter=N url) has exactly one chapter. Real txt files break that in
+// several ways (book 9039 has all of them): title-only stubs right before
+// the full chapter, stray numbers (第1011章 for 1510, 第1958章 before 1598),
+// doubled numbers, and re-uploaded runs (1944-1946 again, renumbered;
+// 1975-1977 after 1978-1980, lightly edited).
+//   1. An empty chapter next to one with the same number is a stub: dropped.
+//   2. 第1章 followed by 第2章 after higher numbers is a restart (per-volume
+//      numbering): the list ends there, as numbers no longer identify a
+//      chapter past it.
+//   3. The longest run of increasing numbers in file order is kept (on a
+//      tie, the earlier chapters).
+//   4. Each chapter outside it is dropped if it repeats a nearby kept
+//      chapter (same text; same title and about the same length; or 80%
+//      the same text, a revised copy); else
+//      takes the one free number between its kept neighbours, if exactly
+//      one is free; else is appended to the previous kept chapter, heading
+//      line included, so no text is lost. Unnumbered headings (番外, 楔子)
+//      are appended the same way (to the first chapter if before any).
+// `repairs` describes each fix.
+const flat = (s) => (s || '').replace(/\s+/g, '');
+const titleStem = (title) => (title || '')
+  .replace(/^第\s*[0-9０-９零〇一二三四五六七八九十百千万萬两兩]+\s*[章节節回]/, '')
+  .replace(/[\p{P}\p{S}\s]+/gu, '');
+// Share of 6-character pieces two texts have in common (Jaccard), 0..1.
+const shingles = (s) => { const set = new Set(); for (let i = 0; i + 6 <= s.length; i++) set.add(s.slice(i, i + 6)); return set; };
+const similarity = (a, b) => {
+  const x = shingles(a), y = shingles(b);
+  if (!x.size || !y.size) return 0;
+  let both = 0;
+  for (const k of x) if (y.has(k)) both++;
+  return both / (x.size + y.size - both);
+};
+const NEAR = 15; // how far apart (in file order) a repeat is looked for
 export const numberBookChapters = (parsed) => {
-  const src = parsed.map((c) => ({ ...c, number: parseChapterNumber(c.title) }));
-  const out = [];
   const repairs = [];
-  let pending = []; // unnumbered pieces before the first numbered chapter
-  const append = (c, why) => {
-    const prev = out[out.length - 1];
-    const piece = `${c.title}\n${c.text}`.trim();
-    if (prev) prev.text = prev.text ? `${prev.text}\n${piece}` : piece;
-    else pending.push(piece);
-    repairs.push(`${why}: "${c.title}" ${prev ? `appended to 第${prev.number}章` : 'kept with the first chapter'}`);
-  };
-  // The next numbered heading, past any repeats of `skip` (a doubled one).
-  const nextNumber = (i, skip) => {
-    for (let j = i + 1; j < src.length; j++) if (Number.isFinite(src[j].number) && src[j].number !== skip) return src[j];
+  let src = parsed.map((c) => ({ ...c, number: parseChapterNumber(c.title) }));
+
+  // 1. Stubs.
+  src = src.filter((c, i) => {
+    const stub = Number.isFinite(c.number) && !flat(c.text)
+      && [src[i - 1], src[i + 1]].some((d) => d && d.number === c.number && flat(d.text));
+    if (stub) repairs.push(`stub: dropped empty "${c.title}"`);
+    return !stub;
+  });
+
+  // 2. Restart.
+  let seen = 0;
+  for (let i = 0; i < src.length; i++) {
+    const n = src[i].number;
+    if (!Number.isFinite(n)) continue;
+    const nx = src.slice(i + 1).find((d) => Number.isFinite(d.number));
+    if (n === 1 && seen > 2 && nx && nx.number === 2) {
+      repairs.push(`numbering restarts at "${src[i].title}" after 第${seen}章: the rest of the text is left out`);
+      src = src.slice(0, i);
+      break;
+    }
+    seen = Math.max(seen, n);
+  }
+
+  // 3. Longest increasing run (O(n log n)): tails[k] = index ending the
+  // best run of length k+1 with the smallest last number.
+  const tails = [];
+  const prev = new Array(src.length).fill(-1);
+  for (let i = 0; i < src.length; i++) {
+    const n = src[i].number;
+    if (!Number.isFinite(n)) continue;
+    let lo = 0, hi = tails.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (src[tails[m]].number < n) lo = m + 1; else hi = m; }
+    if (lo === tails.length || src[tails[lo]].number > n) {
+      prev[i] = lo ? tails[lo - 1] : -1;
+      tails[lo] = i;
+    } // equal: keep the earlier chapter
+  }
+  const inRun = new Set();
+  for (let i = tails.length ? tails[tails.length - 1] : -1; i >= 0; i = prev[i]) inRun.add(i);
+
+  // 4. Everything else.
+  const repeats = (c, i) => {
+    for (let j = Math.max(0, i - NEAR); j <= Math.min(src.length - 1, i + NEAR); j++) {
+      if (j === i || !inRun.has(j)) continue;
+      const d = src[j];
+      if (flat(c.text) && flat(c.text) === flat(d.text)) return d;
+      const a = flat(c.text).length, b = flat(d.text).length;
+      if (titleStem(c.title) && titleStem(c.title) === titleStem(d.title) && Math.abs(a - b) <= 0.05 * Math.max(a, b)) return d;
+      if (a && Math.abs(a - b) <= 0.2 * Math.max(a, b) && similarity(flat(c.text), flat(d.text)) >= 0.8) return d; // a revised copy
+    }
     return null;
+  };
+  const nextRun = (i) => { for (let j = i + 1; j < src.length; j++) if (inRun.has(j)) return src[j]; return null; };
+  const out = [];
+  const pending = [];
+  const append = (c, why) => {
+    const last = out[out.length - 1];
+    const piece = `${c.title}\n${c.text}`.trim();
+    if (last) last.text = last.text ? `${last.text}\n${piece}` : piece;
+    else pending.push(piece);
+    repairs.push(`${why}: "${c.title}" ${last ? `appended to 第${last.number}章` : 'kept with the first chapter'}`);
   };
   for (let i = 0; i < src.length; i++) {
     const c = src[i];
-    const n = c.number;
-    const last = out.length ? out[out.length - 1].number : 0;
-    if (!Number.isFinite(n)) { append(c, 'unnumbered'); continue; }
-    if (n > last) {
-      const nx = nextNumber(i, last);
-      // In order unless the following heading falls back between last and n.
-      if (!nx || nx.number >= n || nx.number <= last) {
-        out.push({ number: n, title: c.title, text: c.text });
-        continue;
-      }
-    }
-    if (n === last) {
-      const prev = out[out.length - 1];
-      if (sameText(prev.text, c.text)) repairs.push(`doubled 第${n}章: dropped "${c.title}" (same text)`);
-      else append(c, `doubled 第${n}章`);
-      continue;
-    }
-    // Out of order (n > the next heading, or n < last).
-    // A lower number that the next heading follows, not the old sequence.
-    const nx = nextNumber(i, last);
-    if (n < last && nx && nx.number <= last) {
-      repairs.push(`numbering restarts at "${c.title}" after 第${last}章: the rest of the text is left out`);
-      break;
-    }
-    if (nx && nx.number === last + 2) {
-      const title = c.title.replace(/第\s*[0-9零〇一二三四五六七八九十百千万萬两]+\s*([章节節回])/, `第${last + 1}$1`);
-      repairs.push(`stray number: "${c.title}" renumbered as 第${last + 1}章`);
-      out.push({ number: last + 1, title, text: c.text });
-    } else if (nx && sameText(nx.text, c.text)) {
-      repairs.push(`stray number: dropped "${c.title}" (same text as "${nx.title}")`);
+    if (inRun.has(i)) { out.push({ number: c.number, title: c.title, text: c.text }); continue; }
+    if (!Number.isFinite(c.number)) { append(c, 'unnumbered'); continue; }
+    const dup = repeats(c, i);
+    if (dup) { repairs.push(`repeat: dropped "${c.title}" (same as "${dup.title}")`); continue; }
+    const lo = out.length ? out[out.length - 1].number : 0;
+    const hi = nextRun(i)?.number;
+    if (hi === lo + 2) {
+      const n = lo + 1;
+      const title = c.title.replace(/第\s*[0-9０-９零〇一二三四五六七八九十百千万萬两兩]+\s*([章节節回])/, `第${n}$1`);
+      repairs.push(`out of order: "${c.title}" renumbered as 第${n}章`);
+      out.push({ number: n, title, text: c.text });
     } else {
-      append(c, 'stray number');
+      append(c, 'out of order');
     }
   }
   if (pending.length && out.length) out[0].text = [...pending, out[0].text].filter(Boolean).join('\n');
