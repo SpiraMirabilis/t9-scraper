@@ -75,6 +75,21 @@ test('groupChapters merges "(n/m)" split pages (novel543)', () => {
   assert.equal(out[1].title, '第434章 下一章');
 });
 
+test('groupChapters glues joinPrev pages mid-paragraph (novels.com.tw)', () => {
+  const out = groupChapters([
+    { url: 'c/1.html', title: '第一章：海洋時代（1 / 4）', text: 'A。\n海域中，充斥著十' },
+    { url: 'c/1_2.html', title: '第一章：海洋時代（2 / 4）', text: '分危險。\nB…', joinPrev: true },
+    { url: 'c/1_3.html', title: '第一章：海洋時代（3 / 4）', text: '」\nC。', joinPrev: true },
+    { url: 'c/1_4.html', title: '第一章：海洋時代（4 / 4）', text: '「D」', joinPrev: true },
+    { url: 'c/2.html', title: '第二章：占卜（1 / 1）', text: 'E' },
+  ]);
+  assert.equal(out.length, 2);
+  assert.equal(out[0].title, '第一章：海洋時代');
+  assert.equal(out[0].text, 'A。\n海域中，充斥著十分危險。\nB…」\nC。\n「D」');
+  assert.equal(out[0].sourceUrls.length, 4);
+  assert.deepEqual(out.map((c) => c.number), [1, 2]);
+});
+
 test('site routing', () => {
   assert.equal(adapterFor('https://twkan.com/book/12345.html').name, 'twkan');
   assert.equal(adapterFor('https://www.twkan.com/txt/12345/678').name, 'twkan');
@@ -110,6 +125,11 @@ test('site routing', () => {
   assert.equal(adapterFor('https://www.jpxs123.com/cyjk/12599/1.html').bookId(new URL('https://jpxs123.com/cyjk/12599/1.html')), 'cyjk/12599');
   assert.equal(adapterFor('https://jpxs123.com/author/10501/qiyuefeng.html'), null);
   assert.equal(adapterFor('https://jpxs123.com/cyjk/'), null);
+  const nv = 'https://www.novels.com.tw/novels/no5fad5ed3de58ffd0ab2402181e1c23fcf70678afef5f782be327c9c7bb8f211e/';
+  assert.equal(adapterFor(nv).name, 'novelscomtw');
+  assert.equal(adapterFor(nv + '209058032_2.html').bookId(new URL(nv + '209058032_2.html')), 'no5fad5ed3de58ffd0ab2402181e1c23fcf70678afef5f782be327c9c7bb8f211e');
+  assert.equal(adapterFor('https://www.novels.com.tw/nosort/1/1/'), null);
+  assert.equal(adapterFor('https://www.novels.com.tw/author/x/'), null);
   assert.equal(adapterFor('https://evil-twkan.com/book/1.html'), null);
   assert.equal(adapterFor('https://twkan.com/'), null);
   assert.equal(adapterFor('not a url'), null);

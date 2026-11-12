@@ -21,7 +21,8 @@
     "https://*.ixdzs.hk/*",
     "https://*.uukanshu.cc/*",
     "https://*.52shuku.net/*",
-    "https://*.jpxs123.com/*"
+    "https://*.jpxs123.com/*",
+    "https://*.novels.com.tw/*"
   ],
   "background": {
     "service_worker": "background.js"

@@ -64,6 +64,17 @@ export const chapterTitle = (title) => (title || '').trim().replace(PAGE_SUFFIX_
 export const chapterKey = (p) =>
   Number.isFinite(p.number) ? `#${p.number}` : chapterTitle(p.title);
 
+// A page cut at a fixed length (novels.com.tw, record flag joinPrev) starts
+// mid-paragraph, so its first line is glued onto the previous page's last.
+// Exception: the previous page ends a sentence and this one doesn't open
+// with closing punctuation -- the cut most likely fell between paragraphs.
+const SENTENCE_END_RE = /[。！？!?…」』”）)]$/;
+const CLOSING_START_RE = /^[」』”’）)，,。！？!?…、；;：:]/;
+export const joinParts = (prev, next) => {
+  if (SENTENCE_END_RE.test(prev) && !CLOSING_START_RE.test(next)) return `${prev}\n${next}`;
+  return prev + next;
+};
+
 // Group consecutive pages into chapters. Replaces the fragile downstream
 // "split a flat file on a chapter-header regex" step.
 export const groupChapters = (pages, { headerRe = CN_HEADER_RE } = {}) => {
@@ -77,7 +88,9 @@ export const groupChapters = (pages, { headerRe = CN_HEADER_RE } = {}) => {
     const sec = (p.secCanvases || []).map((x) => ({ url: p.url, ...x }));
     if (sameChapter) {
       last.sourceUrls.push(p.url);
-      if (body) last._parts.push(body);
+      if (body && p.joinPrev && last._parts.length) {
+        last._parts.push(joinParts(last._parts.pop(), body));
+      } else if (body) last._parts.push(body);
       last._sec.push(...sec);
     } else {
       chapters.push({

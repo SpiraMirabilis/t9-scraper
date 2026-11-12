@@ -97,7 +97,7 @@ return `200` with that job and `deduped: true` instead of starting a second copy
 
 How the chapter job fields work:
 - **`url`** can be a book page or a chapter page. The site is picked from the URL.
-- **`fromChapter`** is a TOC entry's `position`: the 1-based TOC position on twkan, wfxs, 69shuba, novel543, biquge, ixdzs and uukanshu, and the chapter number on 52shuku, jpxs123 and novellunar. If that position doesn't exist (sources have gaps), the job starts at the next one that does.
+- **`fromChapter`** is a TOC entry's `position`: the 1-based TOC position on twkan, wfxs, 69shuba, novel543, biquge, ixdzs, uukanshu and novels.com.tw, and the chapter number on 52shuku, jpxs123 and novellunar. If that position doesn't exist (sources have gaps), the job starts at the next one that does.
 - **Defaults:** start at chapter 1, or at `url` if it's a chapter page, and run to the end of the book.
 - **`toChapter`** is inclusive and compared against the chapter number parsed from the title.
 - **`delayMs`** can only raise the site's pacing, never drop it below the floor.
