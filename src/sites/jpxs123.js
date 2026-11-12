@@ -1,21 +1,24 @@
-// jpxs123.com (精品小說網), served in Traditional (GB-encoded pages). Like
-// 52shuku, whole books cut into fixed-size pages (120 paragraphs) that ignore
-// chapter boundaries.
+// jpxs123.com (精品小說網), served in Traditional. Each book is a dated upload
+// of a finished range ("東京，從動畫監督開始(1-172)", 時間：2026-09-26) that the
+// site also offers as one txt download -- so a job downloads that file once
+// and splits it into chapters (common.js parseBookText) instead of walking
+// the reader pages. The file is cached (src/booktext.js, BOOK_TEXT_TTL_HOURS)
+// and replaced as soon as the book page shows a different upload. It is
+// UTF-8, unlike the GB-encoded pages, whose stray bytes garbled a few chars.
 //
 // URL shapes:
-//   /<cat>/<id>.html      book page: blurb + the page list (.book_list li,
-//                         "第1节" -> <cat>/<id>/1.html, oldest first)
-//   /<cat>/<id>/<n>.html  reader page n; its h1 says "第n章" but means page
+//   /<cat>/<id>.html       book page: name, author, date, the txt link
+//   /txt/<cls>-<id>-0.html download page: #dowloadnUrl, whose `link` attr
+//                          "xs../doaction.php?..." the site's JS rewrites to
+//                          /e/DownSys/doaction.php?... (302 -> the .txt)
+//   /<cat>/<id>/<n>.html   reader page n (120 paragraphs; ignores chapters)
 //
-// Chapter headings ("第一百七十二章 影響") are ordinary <p>s inside the text,
-// so capture() splits each page at them (common.js pageRecords). On the last
-// page 下一章 links back to the page itself.
-//
-// The page list says nothing about chapters, so the TOC reads the latest
-// chapter off the last page, and fromChapter (a chapter number, as elsewhere)
-// is found by searching the pages: see pagedBook in common.js.
+// fromChapter is a chapter number, as on 52shuku. TOC urls are the book page
+// plus ?chapter=N (common.js pagedChapterUrl), which clients pass back as
+// fromUrl.
 
-import { pageRecords, pagedToc, resolvePagedStart, chapterFromUrl } from './common.js';
+import { parseBookText, parseChapterNumber, isHeading, pagedChapterUrl, chapterFromUrl } from './common.js';
+import { cachedBookText } from '../booktext.js';
 
 const PATH_RE = /^\/([a-z]+)\/(\d+)(?:\/(\d+))?\.html$/i;
 // Top-level sections that aren't book categories.
@@ -51,107 +54,129 @@ export const parseBookName = (s) => (s || '').trim()
 export function makeSite(common) {
   const { textOf } = common;
 
-  const grabLines = () => {
-    const div = document.querySelector('.read_chapterDetail');
-    if (!div) return null;
-    const lines = [];
-    for (const p of div.querySelectorAll('p')) {
-      const clone = p.cloneNode(true);
-      clone.querySelectorAll('script, style, noscript, ins, iframe').forEach((el) => el.remove());
-      clone.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
-      for (const l of (clone.textContent || '').split('\n')) {
-        const t = l.replace(/ /g, ' ').trim();
-        if (t) lines.push(t);
-      }
-    }
-    return lines.length ? lines : null;
-  };
-
   return {
-    async capture() {
-      let lines = grabLines();
-      for (let i = 0; !lines && i < 3; i++) { // slow-load fallback only
-        await new Promise((r) => setTimeout(r, 800));
-        lines = grabLines();
-      }
-      return {
-        pageTitle: textOf(document.querySelector('.read_chapterName h1')),
-        author: textOf(document.querySelector('.read_chapterName .textinfo')).replace(/^作者[：:]\s*/, ''),
-        lines,
-      };
-    },
-    tocEntries() {
-      return [...document.querySelectorAll('.book_list li a[href]')]
-        .map((a) => ({ title: textOf(a), url: a.href }));
-    },
-    tocMeta() {
+    bookInfo() {
+      const spans = [...document.querySelectorAll('.book_info .date span')].map(textOf);
+      const txt = [...document.querySelectorAll('.booktips a[href]')].find((a) => /\/txt\//.test(a.href));
       return {
         title: textOf(document.querySelector('.book_info .infos h1')),
         author: textOf(document.querySelector('.book_info .date a[href*="/author/"]')),
+        date: (spans.find((s) => /時間|时间/.test(s)) || '').replace(/^.*[：:]\s*/, ''),
+        txtHref: txt ? txt.href : null,
       };
     },
-    nextPageHref() {
-      const a = [...document.querySelectorAll('.pageNav a[href]')]
-        .find((x) => textOf(x) === '下一章');
-      return a ? a.href : null;
+    // What mydowload.js does to the link.
+    downloadHref() {
+      const a = document.getElementById('dowloadnUrl');
+      const link = a && (a.getAttribute('link') || a.getAttribute('href'));
+      if (!link) return null;
+      return new URL(link.replace('xs../', '/e/DownSys/'), location.href).href;
+    },
+    // The txt, decoded: UTF-8 so far, GB18030 if an old upload isn't.
+    async fetchText(url) {
+      const r = await fetch(url, { credentials: 'include' });
+      if (!r.ok) return { error: `HTTP ${r.status}` };
+      if (/html/i.test(r.headers.get('content-type') || '')) return { error: `got a web page, not the txt (${r.url})` };
+      const buf = await r.arrayBuffer();
+      let text;
+      try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+      catch { text = new TextDecoder('gb18030').decode(buf); }
+      return { text };
+    },
+    // A reader page's paragraphs (to map an old reader-page fromUrl).
+    pageLines() {
+      const div = document.querySelector('.read_chapterDetail');
+      if (!div) return [];
+      return [...div.querySelectorAll('p')].map((p) => (p.textContent || '').replace(/ /g, ' ').trim()).filter(Boolean);
     },
   };
 }
 
 export const worlds = {};
 
-// The book page: name, author and the page list.
-async function bookPage(ctx, url) {
+// Book page -> its metadata, then the whole book's text (cached).
+async function loadBook(ctx, url) {
   const u = new URL(url);
   const bookUrl = `${u.origin}/${bookId(u)}.html`;
   await ctx.goto(bookUrl);
-  const pages = (await ctx.call('tocEntries')).filter((e) => readerPage(e.url));
-  if (!pages.length) throw new Error('no pages found on the book page');
-  const { title, author } = await ctx.call('tocMeta');
-  return { bookUrl, pages, bookName: parseBookName(title), ...(author ? { author } : {}) };
+  const info = await ctx.call('bookInfo');
+  if (!info.txtHref) throw new Error(`no txt download link on ${bookUrl}`);
+  const { text, cached } = await cachedBookText({
+    key: `jpxs123-${bookId(u)}`,
+    signature: `${info.title}|${info.date}`,
+    download: async () => {
+      await ctx.sleep(ctx.settings.delayMs);
+      await ctx.goto(info.txtHref);
+      const href = await ctx.call('downloadHref');
+      if (!href) throw new Error(`no download link on ${info.txtHref}`);
+      const r = await ctx.call('fetchText', href);
+      if (!r.text) throw new Error(`txt download failed: ${r.error || 'empty file'}`);
+      return r.text;
+    },
+  });
+  const book = parseBookText(text);
+  if (!book.chapters.length) throw new Error(`no chapter headings in the txt of ${bookUrl}`);
+  ctx.progress?.({ bookText: cached ? 'cached' : 'downloaded' });
+  return { bookUrl, bookName: parseBookName(info.title), author: info.author, ...book };
 }
 
-// Chapters 1..latest, read off the last page (common.js pagedToc).
-export const readToc = async (ctx, { url }) => pagedToc(ctx, await bookPage(ctx, url));
-
-// fromChapter = chapter number; its page is found by search (common.js). A
-// TOC url (book page + ?chapter=N) as fromUrl or url means the same.
-export async function resolveStart(ctx, { url, fromChapter, fromUrl }) {
-  if (fromUrl && readerPage(fromUrl)) return fromUrl;
-  if (!fromUrl && readerPage(url) && !fromChapter) return url;
-  fromChapter = chapterFromUrl(fromUrl) || fromChapter || chapterFromUrl(url);
-  const { pages, bookName, author } = await bookPage(ctx, url);
-  const patch = {};
-  if (bookName && !ctx.meta.bookName) patch.bookName = bookName;
-  if (author && !ctx.meta.author) patch.author = author;
-  if (Object.keys(patch).length) ctx.setMeta(patch);
-  return resolvePagedStart(ctx, { pages, fromChapter });
+// Chapters 1..latest (position = number). Numbers the book skips still get
+// an entry, so chapterCount == the latest chapter, as clients expect.
+export async function readToc(ctx, { url }) {
+  const b = await loadBook(ctx, url);
+  const titles = new Map();
+  for (const c of b.chapters) {
+    const n = parseChapterNumber(c.title);
+    if (Number.isFinite(n) && !titles.has(n)) titles.set(n, c.title);
+  }
+  const latest = titles.size ? Math.max(...titles.keys()) : 0;
+  const chapters = [];
+  for (let n = 1; n <= latest; n++) {
+    chapters.push({ position: n, number: n, title: titles.get(n) || `第${n}章`, url: pagedChapterUrl(b.bookUrl, n) });
+  }
+  return { bookName: b.bookName, ...(b.author ? { author: b.author } : {}), chapters };
 }
 
-export const isEndUrl = () => false;
-
-// One record per chapter piece on the page (common.js pageRecords).
-export async function capture(ctx) {
-  const r = await ctx.call('capture');
-  if (!r.lines) return null;
-  const patch = {};
-  if (!ctx.meta.bookName && r.pageTitle) patch.bookName = parseBookName(r.pageTitle);
-  if (!ctx.meta.author && r.author) patch.author = r.author;
-  const page = readerPage(await ctx.url())?.page;
-  return pageRecords(ctx, r.lines, { firstPage: page === 1, patch });
-}
-
-export const isEndAfterCapture = () => false;
-
-export async function next(ctx) {
-  const href = await ctx.call('nextPageHref');
-  const cur = readerPage(await ctx.url());
-  const nxt = href && readerPage(href);
-  // The last page's 下一章 points at itself.
-  if (!nxt || (cur && (nxt.book !== cur.book || nxt.page <= cur.page))) return 'end';
+// The first chapter that starts on an old reader-page url.
+async function chapterOnPage(ctx, href) {
   await ctx.goto(href);
-  return 'navigated';
+  const head = (await ctx.call('pageLines')).find(isHeading);
+  const n = head && parseChapterNumber(head);
+  if (!Number.isFinite(n)) throw new Error(`no chapter starts on ${href}; pass fromChapter instead`);
+  await ctx.sleep(ctx.settings.delayMs);
+  return n;
 }
+
+// Every chapter from the start chapter on; the runner applies toChapter and
+// maxChapters. fromChapter N starts at the first heading numbered >= N.
+export async function bookRecords(ctx, { url, fromChapter, fromUrl }) {
+  let from = chapterFromUrl(fromUrl) || fromChapter || chapterFromUrl(url);
+  if (!from && (readerPage(fromUrl) || readerPage(url))) from = await chapterOnPage(ctx, readerPage(fromUrl) ? fromUrl : url);
+  const b = await loadBook(ctx, url);
+  const patch = {};
+  if (b.bookName && !ctx.meta.bookName) patch.bookName = b.bookName;
+  if (b.author && !ctx.meta.author) patch.author = b.author;
+  if (b.intro && !ctx.meta.intro) patch.intro = b.intro;
+  if (Object.keys(patch).length) ctx.setMeta(patch);
+
+  let start = 0;
+  if (from > 1) {
+    start = b.chapters.findIndex((c) => parseChapterNumber(c.title) >= from);
+    if (start < 0) throw new Error(`chapter ${from} not found (the book's last chapter is lower)`);
+  }
+  return b.chapters.slice(start).map((c) => {
+    const n = parseChapterNumber(c.title);
+    return { ...c, url: Number.isFinite(n) ? pagedChapterUrl(b.bookUrl, n) : b.bookUrl };
+  });
+}
+
+// The runner never walks pages for this site (bookRecords), but the adapter
+// interface still has these.
+export const resolveStart = async (ctx, { url }) => url;
+export const isEndUrl = () => false;
+export const capture = async () => null;
+export const isEndAfterCapture = () => false;
+export const next = async () => 'end';
 
 export const exportMeta = (meta) => ({
   bookName: meta.bookName || '',

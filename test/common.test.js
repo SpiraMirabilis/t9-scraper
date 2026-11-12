@@ -254,3 +254,80 @@ test('paged books: TOC chapter urls carry the chapter back as fromUrl', async ()
   assert.equal(chapterFromUrl('https://jpxs123.com/dsxs/12403.html'), null);
   assert.equal(adapterFor(u).bookId(new URL(u)), 'dsxs/12403');
 });
+
+test('book text: headings, prose guards, markers, volumes, intro', async () => {
+  const { parseBookText } = await import('../src/sites/common.js');
+  const text = [
+    '﻿東京',
+    '作者：某人',
+    '簡介：',
+    '第一句。',
+    '　　第二句。',
+    '',
+    '第一章 開始',
+    '　　正文一。',
+    '　　第一章的名字取得不好。', // indented prose that starts like a heading
+    '　　第二章3k字送上~',
+    '第2章 下一章！',
+    '　　正文二。',
+    '🍎 第3章 付費',
+    '　　正文三。',
+    '第二卷 雲遊四海',
+    '　　卷首語。',
+    '第一章 新卷',
+    '　　正文。',
+    '番外 後記',
+    '　　番外正文。',
+    '第五章寫完了。', // unindented, but a sentence
+  ].join('\r\n');
+  const b = parseBookText(text);
+  assert.equal(b.intro, '第一句。\n第二句。');
+  assert.deepEqual(b.chapters.map((c) => c.title), ['第一章 開始', '第2章 下一章！', '第3章 付費', '第一章 新卷', '番外 後記']);
+  assert.equal(b.chapters[0].text, '正文一。\n第一章的名字取得不好。\n第二章3k字送上~');
+  assert.equal(b.chapters[2].text, '正文三。');
+  assert.equal(b.chapters[3].text, '正文。'); // the volume's preface is dropped
+  assert.equal(b.chapters[4].text, '番外正文。\n第五章寫完了。');
+  // No 簡介 line: everything before chapter 1 but the title and author.
+  assert.equal(parseBookText('書名\n作者：x\n一段。\n第1章 a\n　　b').intro, '一段。');
+});
+
+test('book text cache: reused while fresh and unchanged', async () => {
+  const { cachedBookText } = await import('../src/booktext.js');
+  let downloads = 0;
+  const get = (signature, now = Date.now()) => cachedBookText({ key: 'jpxs123-cyjk/1', signature, now, download: async () => `v${++downloads}` });
+  assert.deepEqual(await get('a(1-10)|d1'), { text: 'v1', cached: false });
+  assert.deepEqual(await get('a(1-10)|d1'), { text: 'v1', cached: true });
+  assert.deepEqual(await get('a(1-12)|d2'), { text: 'v2', cached: false }); // a new upload
+  assert.deepEqual(await get('a(1-12)|d2', Date.now() + 49 * 3600_000), { text: 'v3', cached: false }); // expired
+});
+
+test('jpxs123: TOC and chapter records from the txt', async () => {
+  const jp = await import('../src/sites/jpxs123.js');
+  const txt = ['書', '作者：x', '簡介：', '簡介正文。',
+    '第1章 一', '　　一。', '第2章 二', '　　二。', '第2章 二又', '　　又。', '第4章 四', '　　四。'].join('\n');
+  let calls = 0;
+  const meta = {};
+  const ctx = {
+    meta, settings: { delayMs: 0 }, sleep: async () => {}, goto: async () => {},
+    setMeta: (p) => Object.assign(meta, p),
+    call: async (name) => {
+      calls++;
+      if (name === 'bookInfo') return { title: '書(1-4)', author: 'x', date: '2026-01-01', txtHref: 'https://www.jpxs123.com/txt/1-9-0.html' };
+      if (name === 'downloadHref') return 'https://www.jpxs123.com/e/DownSys/doaction.php?id=9';
+      if (name === 'fetchText') return { text: txt };
+      throw new Error(name);
+    },
+  };
+  const toc = await jp.readToc(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html' });
+  assert.equal(toc.bookName, '書');
+  assert.deepEqual(toc.chapters.map((c) => c.title), ['第1章 一', '第2章 二', '第3章', '第4章 四']);
+  assert.equal(toc.chapters[2].url, 'https://www.jpxs123.com/cyjk/9.html?chapter=3');
+  calls = 0;
+  const recs = await jp.bookRecords(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html', fromUrl: toc.chapters[2].url });
+  assert.equal(calls, 1); // the book page only: the txt came from the cache
+  assert.deepEqual(recs.map((r) => r.title), ['第4章 四']);
+  assert.equal(recs[0].text, '四。');
+  assert.equal(meta.intro, '簡介正文。');
+  assert.equal((await jp.bookRecords(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html' })).length, 4);
+  await assert.rejects(jp.bookRecords(ctx, { url: 'https://www.jpxs123.com/cyjk/9.html', fromChapter: 5 }), /chapter 5 not found/);
+});

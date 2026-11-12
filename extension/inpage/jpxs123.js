@@ -34,49 +34,40 @@ globalThis.__scrInvoke = async ({ name, arg }) => {
   const makeSite = function makeSite(common) {
   const { textOf } = common;
 
-  const grabLines = () => {
-    const div = document.querySelector('.read_chapterDetail');
-    if (!div) return null;
-    const lines = [];
-    for (const p of div.querySelectorAll('p')) {
-      const clone = p.cloneNode(true);
-      clone.querySelectorAll('script, style, noscript, ins, iframe').forEach((el) => el.remove());
-      clone.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
-      for (const l of (clone.textContent || '').split('\n')) {
-        const t = l.replace(/ /g, ' ').trim();
-        if (t) lines.push(t);
-      }
-    }
-    return lines.length ? lines : null;
-  };
-
   return {
-    async capture() {
-      let lines = grabLines();
-      for (let i = 0; !lines && i < 3; i++) { // slow-load fallback only
-        await new Promise((r) => setTimeout(r, 800));
-        lines = grabLines();
-      }
-      return {
-        pageTitle: textOf(document.querySelector('.read_chapterName h1')),
-        author: textOf(document.querySelector('.read_chapterName .textinfo')).replace(/^作者[：:]\s*/, ''),
-        lines,
-      };
-    },
-    tocEntries() {
-      return [...document.querySelectorAll('.book_list li a[href]')]
-        .map((a) => ({ title: textOf(a), url: a.href }));
-    },
-    tocMeta() {
+    bookInfo() {
+      const spans = [...document.querySelectorAll('.book_info .date span')].map(textOf);
+      const txt = [...document.querySelectorAll('.booktips a[href]')].find((a) => /\/txt\//.test(a.href));
       return {
         title: textOf(document.querySelector('.book_info .infos h1')),
         author: textOf(document.querySelector('.book_info .date a[href*="/author/"]')),
+        date: (spans.find((s) => /時間|时间/.test(s)) || '').replace(/^.*[：:]\s*/, ''),
+        txtHref: txt ? txt.href : null,
       };
     },
-    nextPageHref() {
-      const a = [...document.querySelectorAll('.pageNav a[href]')]
-        .find((x) => textOf(x) === '下一章');
-      return a ? a.href : null;
+    // What mydowload.js does to the link.
+    downloadHref() {
+      const a = document.getElementById('dowloadnUrl');
+      const link = a && (a.getAttribute('link') || a.getAttribute('href'));
+      if (!link) return null;
+      return new URL(link.replace('xs../', '/e/DownSys/'), location.href).href;
+    },
+    // The txt, decoded: UTF-8 so far, GB18030 if an old upload isn't.
+    async fetchText(url) {
+      const r = await fetch(url, { credentials: 'include' });
+      if (!r.ok) return { error: `HTTP ${r.status}` };
+      if (/html/i.test(r.headers.get('content-type') || '')) return { error: `got a web page, not the txt (${r.url})` };
+      const buf = await r.arrayBuffer();
+      let text;
+      try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+      catch { text = new TextDecoder('gb18030').decode(buf); }
+      return { text };
+    },
+    // A reader page's paragraphs (to map an old reader-page fromUrl).
+    pageLines() {
+      const div = document.querySelector('.read_chapterDetail');
+      if (!div) return [];
+      return [...div.querySelectorAll('p')].map((p) => (p.textContent || '').replace(/ /g, ' ').trim()).filter(Boolean);
     },
   };
 };

@@ -149,6 +149,72 @@ export const splitPage = (lines) => {
   return pieces;
 };
 
+// A whole book as one plain-text file (jpxs123's txt download): a title /
+// 作者 / 簡介 block, then each chapter as a heading line followed by its
+// paragraphs. Body paragraphs are indented (usually with 　　) and headings
+// aren't, so an indented line is a heading only when 章 is followed by a
+// space or ends the line: body text can open with 第一章的名字… or an
+// author's 第二章3k字送上~. Some sites prefix paid chapters with a symbol
+// (🍎 第77章 …); that is stripped. Volume lines (第二卷 …) are dropped.
+// Rules from the translation pipeline's queue_flat_text.py.
+const BOOK_NUM = '0-9０-９零〇一二三四五六七八九十百千万萬两兩';
+const TEXT_CHAPTER_RE = new RegExp(`^第\\s*[${BOOK_NUM}]{1,12}\\s*章`);
+const TEXT_VOLUME_RE = new RegExp(`^第\\s*[${BOOK_NUM}]{1,12}\\s*卷`);
+const LEAD_MARKER_RE = /^[\s　]*[\p{S}‍︎️]+/u;
+const INDENT_RE = /^[\s　]/;
+
+// 'chapter' | 'volume' | null for one raw line of such a file.
+const stripMarker = (raw) => {
+  const m = raw.match(LEAD_MARKER_RE);
+  return m ? raw.slice(m[0].length).replace(/^[\s　]+/, '') : raw;
+};
+export const textLineKind = (raw) => {
+  const line = stripMarker(raw);
+  const t = line.trim();
+  if (!t) return null;
+  if (TEXT_VOLUME_RE.test(t) && t.length <= 40 && !/[。，,；;：:]$/.test(t)) return 'volume';
+  if (!isHeading(t)) return null;
+  if (INDENT_RE.test(line) && !(TEXT_CHAPTER_RE.test(t) && /章(?:[\s　]|$)/.test(t))) return null;
+  return 'chapter';
+};
+
+// Text -> { intro, chapters: [{ title, text }] } in file order. Lines are
+// trimmed and blank ones dropped, as the reader pages are captured. The
+// intro is what follows 簡介： (else everything before the first chapter but
+// the title and 作者 lines).
+export const parseBookText = (text) => {
+  const lines = (text || '').replace(/^﻿/, '').split(/\r?\n/);
+  const front = [];
+  const chapters = [];
+  let cur = null;
+  for (const raw of lines) {
+    const kind = textLineKind(raw);
+    if (kind === 'volume') { cur = null; continue; }
+    if (kind === 'chapter') {
+      cur = { title: stripMarker(raw).trim(), lines: [] };
+      chapters.push(cur);
+      continue;
+    }
+    const t = raw.trim();
+    if (!t) continue;
+    if (cur) cur.lines.push(t);
+    else if (!chapters.length) front.push(t);
+    // else: between a volume line and its first chapter
+  }
+  const blurb = front.findIndex((l) => /^(簡介|简介|内容简介|內容簡介)[：:]?$/.test(l) || /^(簡介|简介)[：:]/.test(l));
+  let intro;
+  if (blurb >= 0) {
+    const first = front[blurb].replace(/^(內容簡介|内容简介|簡介|简介)[：:]?/, '').trim();
+    intro = [...(first ? [first] : []), ...front.slice(blurb + 1)];
+  } else {
+    intro = front.slice(1).filter((l) => !/^作者[：:]/.test(l));
+  }
+  return {
+    intro: intro.join('\n'),
+    chapters: chapters.map((c) => ({ title: c.title, text: c.lines.join('\n') })),
+  };
+};
+
 // One page of such a book -> one record per chapter piece, for capture() to
 // return. A piece before the page's first heading continues the chapter
 // carried over from the previous page (meta.chapterTitle). On the book's first

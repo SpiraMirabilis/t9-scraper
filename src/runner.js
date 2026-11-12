@@ -303,6 +303,45 @@ export async function runJob(job, control) {
     lastKey = k; lastUrl = pg.url;
   }
 
+  // Stores one record; returns a stop reason, or null to go on.
+  const store = async (r, pageUrl) => {
+    r.url = r.url || pageUrl;
+    const number = Number.isFinite(r.number) ? r.number : parseChapterNumber(r.title);
+    const key = chapterKey(r);
+    const isNewChapter = !key || key !== lastKey;
+
+    if (p.toChapter && Number.isFinite(number) && number > p.toChapter) return 'toChapter';
+    if (isNewChapter && p.maxChapters && chapters >= p.maxChapters) return 'maxChapters';
+
+    pages.add(job.id, r);
+    if (isNewChapter) chapters++;
+    lastKey = key;
+    const st = pages.stats(job.id);
+    ctx.progress({ ...st, chapters, lastUrl: r.url, lastTitle: r.title, lastChapter: number ?? undefined });
+
+    if (await adapter.isEndAfterCapture(ctx, r)) return 'end';
+    // One page per chapter: we already know the range is complete.
+    if (adapter.onePagePerChapter) {
+      if (p.maxChapters && chapters >= p.maxChapters) return 'maxChapters';
+      if (p.toChapter && Number.isFinite(number) && number >= p.toChapter) return 'toChapter';
+    }
+    return null;
+  };
+
+  // A site whose whole book comes in one download (jpxs123's txt): the
+  // adapter returns every record from the start chapter on, in order. A
+  // resumed job skips the ones it already stored.
+  if (adapter.bookRecords) {
+    const recs = await adapter.bookRecords(ctx, p);
+    if (!recs.length) throw new Error(`no chapter text in ${p.url}`);
+    for (const r of recs.slice(stored.length)) {
+      ctx.checkCancelled();
+      const stop = await store(r, p.url);
+      if (stop) return stop;
+    }
+    return 'end';
+  }
+
   if (lastUrl) {
     console.log(`[job ${job.id}] resuming after ${stored.length} stored pages at ${lastUrl}`);
     await ctx.goto(lastUrl);
@@ -341,25 +380,8 @@ export async function runJob(job, control) {
     const pageUrl = await page.url();
     for (const r of Array.isArray(rec) ? rec : [rec]) {
       r.url = pageUrl;
-      const number = Number.isFinite(r.number) ? r.number : parseChapterNumber(r.title);
-      const key = chapterKey(r);
-      const isNewChapter = !key || key !== lastKey;
-
-      if (p.toChapter && Number.isFinite(number) && number > p.toChapter) return 'toChapter';
-      if (isNewChapter && p.maxChapters && chapters >= p.maxChapters) return 'maxChapters';
-
-      pages.add(job.id, r);
-      if (isNewChapter) chapters++;
-      lastKey = key;
-      const st = pages.stats(job.id);
-      ctx.progress({ ...st, chapters, lastUrl: pageUrl, lastTitle: r.title, lastChapter: number ?? undefined });
-
-      if (await adapter.isEndAfterCapture(ctx, r)) return 'end';
-      // One page per chapter: we already know the range is complete.
-      if (adapter.onePagePerChapter) {
-        if (p.maxChapters && chapters >= p.maxChapters) return 'maxChapters';
-        if (p.toChapter && Number.isFinite(number) && number >= p.toChapter) return 'toChapter';
-      }
+      const stop = await store(r, pageUrl);
+      if (stop) return stop;
     }
     lastUrl = pageUrl;
 

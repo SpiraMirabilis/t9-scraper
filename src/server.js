@@ -10,6 +10,7 @@ import { jobs, challenges, nuGroup, nuSubmissions } from './db.js';
 import { adapters, adapterFor, adapterForPage, adapterByName } from './sites/index.js';
 import { allSiteSettings } from './settings.js';
 import { buildResult, capturePath, pruneCaptures } from './runner.js';
+import { pruneBookText } from './booktext.js';
 import { startWorker, kick, cancel, currentJobId } from './queue.js';
 import { SHOT_DIR, normLabel } from './nu.js';
 import { engines, engineNames, defaultEngine, activeEngine, closeAll, warmup } from './engines/index.js';
@@ -602,8 +603,11 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 await app.listen({ host: config.host, port: config.port });
-// Expire page captures: once now, then hourly.
-const sweep = () => { const n = pruneCaptures(); if (n) app.log.info(`deleted ${n} expired page capture(s)`); };
+// Expire page captures and cached book texts: once now, then hourly.
+const sweep = () => {
+  const n = pruneCaptures(); if (n) app.log.info(`deleted ${n} expired page capture(s)`);
+  const b = pruneBookText(); if (b) app.log.info(`deleted ${b} expired book text(s)`);
+};
 sweep();
 setInterval(sweep, 3600_000).unref();
 // WORKER=0: API only, nothing runs queued jobs (maintenance, tests).

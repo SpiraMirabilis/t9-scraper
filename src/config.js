@@ -49,6 +49,9 @@ export const config = {
   // Page-job captures (HTML / PNG files under <dataDir>/captures) are deleted
   // this long after capture; 0 keeps them forever. The job row stays.
   captureTtlHours: int(env.CAPTURE_TTL_HOURS, 24),
+  // Whole-book text downloads (jpxs123's txt, under <dataDir>/booktext) are
+  // reused this long; a new upload of the book replaces one sooner.
+  bookTextTtlHours: int(env.BOOK_TEXT_TTL_HOURS, 48),
 
   // Where a human goes to solve a challenge. Shown in job status and notices.
   vncUrl: env.VNC_URL || 'http://localhost:6080/vnc.html?autoconnect=1&resize=scale',
