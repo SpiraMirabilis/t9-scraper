@@ -7,7 +7,8 @@
 //                            (oldest first) holds only the first 80 chapters;
 //                            clicking the 目录 heading (h2.catalog-toggle)
 //                            POSTs /novel/html and fills in the rest ~400 ms
-//                            later. The heading says 共N章.
+//                            later. The heading says 共N章, which counts the
+//                            list's volume labels too (<li>正文</li>, no link).
 //   /read/<book>/p<n>.html   reader page
 //   /read/<book>/end.html    where 下一章 points on the last chapter
 //
@@ -67,6 +68,10 @@ export function makeSite(common) {
       const m = textOf(document.querySelector('h2.catalog .sub-text-r')).match(/共\s*(\d+)\s*章/);
       return m ? parseInt(m[1], 10) : null;
     },
+    // Items in the full list, volume labels included: what 共N章 counts.
+    tocItemCount() {
+      return document.querySelectorAll('.clist ul.u-chapter > li').length;
+    },
     // The full list (.cfirst above it is the latest-10 teaser, newest first).
     tocEntries() {
       return [...document.querySelectorAll('.clist ul.u-chapter a[href]')]
@@ -93,19 +98,21 @@ export async function readToc(ctx, { url }) {
   await ctx.goto(`${u.origin}/read/${bookId(u)}/`);
   const total = await ctx.call('tocTotal');
   await ctx.call('expandToc');
-  // Done when the list reaches 共N章; without that count, when it stops growing.
-  let entries = [], stable = 0;
+  // Done when the list reaches 共N章 (items, volume labels included); without
+  // that count, when it stops growing.
+  let entries = [], items = 0, stable = 0;
   for (let i = 0; i < 25; i++) {
     await ctx.sleep(400);
     const next = (await ctx.call('tocEntries')).filter((e) => isChapterUrl(e.url));
     stable = next.length && next.length === entries.length ? stable + 1 : 0;
     entries = next;
-    if (total ? entries.length >= total : stable >= 3) break;
-    if (i === 12 && entries.length < (total || Infinity)) await ctx.call('expandToc'); // retry once
+    items = await ctx.call('tocItemCount');
+    if (total ? items >= total : stable >= 3) break;
+    if (i === 12 && items < (total || Infinity)) await ctx.call('expandToc'); // retry once
   }
   if (!entries.length) throw new Error('no chapters found on the TOC');
-  if (total && entries.length < total) {
-    throw new Error(`TOC only loaded ${entries.length} of ${total} chapters`);
+  if (total && items < total) {
+    throw new Error(`TOC only loaded ${items} of ${total} items (${entries.length} chapters)`);
   }
   const { bookName, author } = await ctx.call('tocMeta');
   return {
