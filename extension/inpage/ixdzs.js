@@ -58,6 +58,18 @@ globalThis.__scrInvoke = async ({ name, arg }) => {
         bookName: textOf(document.querySelector('#page-toolbar .page-opt-header h2')),
       };
     },
+    // Opens the 目录 accordion, which loads the full list over XHR.
+    expandToc() {
+      const h = document.querySelector('h2.catalog-toggle');
+      if (!h) return false;
+      h.click();
+      return true;
+    },
+    // The 共N章 count in the 目录 heading, or null.
+    tocTotal() {
+      const m = textOf(document.querySelector('h2.catalog .sub-text-r')).match(/共\s*(\d+)\s*章/);
+      return m ? parseInt(m[1], 10) : null;
+    },
     // The full list (.cfirst above it is the latest-10 teaser, newest first).
     tocEntries() {
       return [...document.querySelectorAll('.clist ul.u-chapter a[href]')]

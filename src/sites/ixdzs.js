@@ -3,9 +3,11 @@
 // names.
 //
 // URL shapes:
-//   /read/<book>/            book detail page; the full TOC is already in the
-//                            HTML (.clist, oldest first) behind the 目录
-//                            accordion, so nothing needs expanding
+//   /read/<book>/            book detail page. Since 2026-11 the HTML's .clist
+//                            (oldest first) holds only the first 80 chapters;
+//                            clicking the 目录 heading (h2.catalog-toggle)
+//                            POSTs /novel/html and fills in the rest ~400 ms
+//                            later. The heading says 共N章.
 //   /read/<book>/p<n>.html   reader page
 //   /read/<book>/end.html    where 下一章 points on the last chapter
 //
@@ -53,6 +55,18 @@ export function makeSite(common) {
         bookName: textOf(document.querySelector('#page-toolbar .page-opt-header h2')),
       };
     },
+    // Opens the 目录 accordion, which loads the full list over XHR.
+    expandToc() {
+      const h = document.querySelector('h2.catalog-toggle');
+      if (!h) return false;
+      h.click();
+      return true;
+    },
+    // The 共N章 count in the 目录 heading, or null.
+    tocTotal() {
+      const m = textOf(document.querySelector('h2.catalog .sub-text-r')).match(/共\s*(\d+)\s*章/);
+      return m ? parseInt(m[1], 10) : null;
+    },
     // The full list (.cfirst above it is the latest-10 teaser, newest first).
     tocEntries() {
       return [...document.querySelectorAll('.clist ul.u-chapter a[href]')]
@@ -77,14 +91,22 @@ export const worlds = {};
 export async function readToc(ctx, { url }) {
   const u = new URL(url);
   await ctx.goto(`${u.origin}/read/${bookId(u)}/`);
+  const total = await ctx.call('tocTotal');
+  await ctx.call('expandToc');
+  // Done when the list reaches 共N章; without that count, when it stops growing.
   let entries = [], stable = 0;
-  for (let i = 0; i < 15 && stable < 2; i++) {
-    await ctx.sleep(600);
+  for (let i = 0; i < 25; i++) {
+    await ctx.sleep(400);
     const next = (await ctx.call('tocEntries')).filter((e) => isChapterUrl(e.url));
     stable = next.length && next.length === entries.length ? stable + 1 : 0;
     entries = next;
+    if (total ? entries.length >= total : stable >= 3) break;
+    if (i === 12 && entries.length < (total || Infinity)) await ctx.call('expandToc'); // retry once
   }
   if (!entries.length) throw new Error('no chapters found on the TOC');
+  if (total && entries.length < total) {
+    throw new Error(`TOC only loaded ${entries.length} of ${total} chapters`);
+  }
   const { bookName, author } = await ctx.call('tocMeta');
   return {
     bookName,
