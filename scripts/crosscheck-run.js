@@ -5,7 +5,7 @@
 // novels.com.tw's ad slot); a line only one site has is junk it lets through.
 //
 //   node --env-file=.env scripts/crosscheck-run.js                 # every book, its sample chapters
-//   node --env-file=.env scripts/crosscheck-run.js --book 天官賜福 --chapters 1,30
+//   node --env-file=.env scripts/crosscheck-run.js --book 默讀 --chapters 1,30
 //   node --env-file=.env scripts/crosscheck-run.js --sites twkan,uukanshu
 //   node --env-file=.env scripts/crosscheck-run.js --dry-run       # show what would be fetched
 //
@@ -105,8 +105,13 @@ for (const book of books) {
       if (!toc) continue;
       // By the adapter's parsed number; else a bare leading number in the title
       // ("2.破烂仙人三登仙京", "1|天官賜福", "100 乱对簿啼笑皆不当"), which the adapters don't parse.
-      const entry = (toc.chapters || []).find((c) => c.number === n) ||
-        (toc.chapters || []).find((c) => !Number.isFinite(c.number) && leadingNumber(c.title) === n);
+      // A TOC that is mostly unnumbered (twkan 默讀: 序章, 於連一, … with one
+      // stray 第二十五章): position n.
+      const list = toc.chapters || [];
+      const numbered = list.filter((c) => Number.isFinite(c.number) || leadingNumber(c.title) !== null).length;
+      const entry = numbered < list.length / 2 ? list[n - 1]
+        : list.find((c) => c.number === n) ||
+          list.find((c) => !Number.isFinite(c.number) && leadingNumber(c.title) === n);
       if (!entry) { notes[site] = 'not in TOC'; continue; }
       try {
         const res = await runJob('/jobs', { url, fromUrl: entry.url, maxChapters: 1 });
