@@ -64,6 +64,7 @@ const runJob = async (route, body) => {
 
 const runId = new Date().toISOString().slice(0, 16).replace(':', '');
 const OUT = path.join(DIR, 'runs', runId);
+const leadingNumber = (t) => { const m = (t || '').match(/^\s*(\d+)(?:[.．、|｜\s]|$)/); return m ? parseInt(m[1], 10) : null; };
 const short = (s, n = 70) => (s.length > n ? `${s.slice(0, n)}…` : s);
 const report = { run: runId, books: [] };
 const md = [`# Cross-source check ${runId}`, ''];
@@ -102,7 +103,10 @@ for (const book of books) {
     for (const [site, url] of sites) {
       const toc = tocs[site];
       if (!toc) continue;
-      const entry = (toc.chapters || []).find((c) => c.number === n);
+      // By the adapter's parsed number; else a bare leading number in the title
+      // ("2.破烂仙人三登仙京", "1|天官賜福", "100 乱对簿啼笑皆不当"), which the adapters don't parse.
+      const entry = (toc.chapters || []).find((c) => c.number === n) ||
+        (toc.chapters || []).find((c) => !Number.isFinite(c.number) && leadingNumber(c.title) === n);
       if (!entry) { notes[site] = 'not in TOC'; continue; }
       try {
         const res = await runJob('/jobs', { url, fromUrl: entry.url, maxChapters: 1 });
