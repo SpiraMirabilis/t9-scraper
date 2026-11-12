@@ -1,0 +1,14 @@
+[Unit]
+Description=Scraper cross-source check (same chapters from every site, compared)
+Requires=scraper.service
+After=scraper.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/scraper
+EnvironmentFile=%h/scraper/.env
+ExecStart=/usr/bin/node scripts/crosscheck-run.js
+# Exit 1 = a site misses lines (see crosscheck/runs/*/report.md), not a crash.
+SuccessExitStatus=1
+# Jobs run at low priority behind T9's; a blocked job waits for a solve.
+TimeoutStartSec=6h

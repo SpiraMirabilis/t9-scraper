@@ -262,6 +262,30 @@ Manual runs: `node scripts/bakeoff-run.js [--engine X] [--dry-run]`, with
 don't count in the report (it only reads `bakeoff/runs.jsonl`), but they do
 share the IP's reputation with Cloudflare.
 
+## Cross-source check
+
+Scrapes the same chapters of a book from every site that carries it and
+compares them line by line, to catch lines an adapter (or the site) loses
+and junk it lets through. `crosscheck/books.json` lists the books (two
+together cover every adapter) and their sample chapters.
+
+- Run: `node --env-file=.env scripts/crosscheck-run.js [--book NAME] [--chapters 1,200] [--sites twkan,uukanshu] [--dry-run]`.
+  Chapter jobs go in at `priority: low`.
+- Texts are converted to Simplified (opencc-js, a dev dependency) and reduced
+  to letters and digits, then compared by character 4-grams, so script,
+  quotes, conversion typos and paragraph breaks don't count as differences.
+- `crosscheck/runs/<run>/report.md` lists, per chapter and site: **missing**
+  lines (at least half of the other sites, and at least 2, have them),
+  **extra** lines (no other site has them), our `[[site: …]]` markers, and
+  sites whose text doesn't match the rest (**misaligned**: a wrong chapter
+  or book, left out of the comparison). Each source's text is saved beside it.
+- Exit code 1 means some site misses a line.
+- Weekly timer (Sundays 04:00): `cp deploy/scraper-crosscheck.* ~/.config/systemd/user/`, then
+  `systemctl --user daemon-reload && systemctl --user enable --now scraper-crosscheck.timer`.
+
+The comparison itself (`src/crosscheck.js`) is pure and unit-tested offline;
+the run script is the only part that touches the network.
+
 ## Adding a site
 
 Copy an adapter in `src/sites/`. Its in-page half (`makeSite(common)`) must be

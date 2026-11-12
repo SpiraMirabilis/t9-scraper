@@ -8,3 +8,4 @@ bakeoff/runs.jsonl
 architect3.json
 *.html
 __pycache__/
+crosscheck/runs/

@@ -1,0 +1,30 @@
+{
+  "_comment": "Books carried by several sites, for scripts/crosscheck-run.js. Between them they cover every adapter. chapters = sample chapter numbers.",
+  "books": [
+    {
+      "name": "我在精神病院學斬神",
+      "chapters": [1, 200, 1000],
+      "sources": {
+        "twkan": "https://twkan.com/book/2832.html",
+        "novelscomtw": "https://www.novels.com.tw/novels/nowozaijingshenbingyuanxuezhanshen/",
+        "biquge": "https://www.biquge.tw/book/826733.html",
+        "novel543": "https://www.novel543.com/0104186924/",
+        "ixdzs": "https://ixdzs8.com/read/391506/",
+        "uukanshu": "https://uukanshu.cc/book/22673/",
+        "jpxs123": "https://www.jpxs123.com/book/9039.html"
+      }
+    },
+    {
+      "name": "天官賜福",
+      "chapters": [1, 100],
+      "sources": {
+        "twkan": "https://twkan.com/book/48479.html",
+        "novelscomtw": "https://www.novels.com.tw/novels/no4fca112d59fa36fc02e4dea673a00ed7ecdf159edea5ad5a9bb0e6727525204e/",
+        "biquge": "https://www.biquge.tw/book/220848.html",
+        "novel543": "https://www.novel543.com/050512208/",
+        "ixdzs": "https://ixdzs8.com/read/297766/",
+        "52shuku": "https://www.52shuku.net/jiakong/hpS7.html"
+      }
+    }
+  ]
+}
