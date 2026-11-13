@@ -397,7 +397,13 @@ export function buildResult(job) {
   if (job.kind === 'toc' || job.kind === 'nu') return { ...(job.result || {}), job: { id: job.id, status: job.status } };
   const adapter = adapterByName(job.site);
   const stored = pages.all(job.id);
-  const chapters = groupChapters(stored, { headerRe: adapter.headerRe || CN_HEADER_RE });
+  let chapters = groupChapters(stored, { headerRe: adapter.headerRe || CN_HEADER_RE });
+  // Paged books (52shuku): a chapter has no page of its own and neighbours
+  // share pages, so clients get its TOC url as sourceUrls[0] (they treat that
+  // as the chapter's identity and cursor) and the pages under pageUrls.
+  if (adapter.chapterUrl) {
+    chapters = chapters.map((c) => ({ ...c, sourceUrls: [adapter.chapterUrl(job.params.url, c.number)], pageUrls: c.sourceUrls }));
+  }
   return {
     book: adapter.bookId(new URL(job.params.url)),
     site: job.site,

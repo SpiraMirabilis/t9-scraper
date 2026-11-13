@@ -15,7 +15,7 @@
 // chapter off the last page, and fromChapter (a chapter number, as elsewhere)
 // is found by searching the pages: see pagedBook in common.js.
 
-import { pageRecords, pagedToc, resolvePagedStart, chapterFromUrl } from './common.js';
+import { pageRecords, pagedToc, resolvePagedStart, chapterFromUrl, pagedChapterUrl } from './common.js';
 
 // Top-level sections that aren't book categories.
 const NOT_BOOK_RE = /^(zuozhe|tuijian|tags_\w+|top|so|e|skin|danmei)$/i;
@@ -125,6 +125,12 @@ export async function resolveStart(ctx, { url, fromChapter, fromUrl }) {
 }
 
 export const isEndUrl = () => false;
+
+// The export's url for chapter n: its TOC entry (see buildResult).
+export const chapterUrl = (url, n) => {
+  const u = new URL(url);
+  return pagedChapterUrl(`${u.origin}/${bookId(u)}.html`, n);
+};
 
 // One record per chapter piece on the page (common.js pageRecords).
 export async function capture(ctx) {

@@ -440,3 +440,12 @@ test('jpxs123: fromUrl past stray and doubled headings', async () => {
   const at1607 = await jp.bookRecords(ctx, { url, fromUrl: `${url}?chapter=1607` });
   assert.equal(at1607[0].title, '第1607章 消失的第六位病人'); // the doubled one had the same text
 });
+
+test('52shuku: an exported chapter is known by its TOC url, not a shared page', async () => {
+  const { chapterUrl } = await import('../src/sites/shuku52.js');
+  const job = 'https://www.52shuku.net/yanqing/23_b/bjYGi.html';
+  assert.equal(chapterUrl(job, 2), 'https://www.52shuku.net/yanqing/23_b/bjYGi.html?chapter=2');
+  // A reader-page job url maps to the same book page.
+  assert.equal(chapterUrl('https://www.52shuku.net/yanqing/23_b/bjYGi_5.html', 6),
+    'https://www.52shuku.net/yanqing/23_b/bjYGi.html?chapter=6');
+});
